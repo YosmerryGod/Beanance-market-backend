@@ -24,9 +24,6 @@ let refreshTimer = null;
 let reconnectAttempts = 0;
 let shuttingDown = false;
 
-const sleep = (milliseconds) =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds));
-
 async function refreshMarketData() {
   const symbols = await fetchExchangeInfo();
   replaceSymbols(symbols);
@@ -127,8 +124,14 @@ function connectToBinance() {
 }
 
 async function bootstrap() {
-  await refreshMarketData();
   await startHttpServer();
+
+  try {
+    await refreshMarketData();
+  } catch (error) {
+    console.error("Initial Binance market snapshot failed:", error);
+    console.warn("The API will stay online and retry on the next refresh cycle");
+  }
 
   connectToBinance();
 
