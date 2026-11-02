@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 "use strict";
 
-// [ADDED] Deployment runner for GitHub Actions.
-const { spawnSync } = require("node:child_process");
-const fs = require("node:fs");
-const path = require("node:path");
+// [MODIFIED] Use ES module imports because package.json declares "type": "module".
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const PROJECT_DIR = process.env.PROJECT_DIR || __dirname;
+// [MODIFIED] Resolve the project directory without CommonJS __dirname.
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_DIR = process.env.PROJECT_DIR || SCRIPT_DIR;
 const BRANCH = process.env.BRANCH || "main";
 const PM2_TARGET = process.env.PM2_TARGET || "beanance-market";
 const APP_PORT = Number(process.env.APP_PORT || 3030);
