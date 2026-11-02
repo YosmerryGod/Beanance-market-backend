@@ -15,6 +15,29 @@ jobs:
     name: Pull, install, and restart on VPS
     runs-on: ubuntu-latest
     steps:
+      - name: Validate SSH private key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+            echo "::error::VPS_SSH_KEY is empty or unavailable."
+            exit 1
+          fi
+
+          KEY_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          if ! ssh-keygen -y -f "$KEY_FILE" >/dev/null 2>&1; then
+            echo "::error::VPS_SSH_KEY is not a valid readable private key. Replace the secret with the complete private key content, including its BEGIN/END lines."
+            exit 1
+          fi
+
+          echo "SSH private key format is valid."
+
       - name: Deploy through SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
