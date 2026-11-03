@@ -6,9 +6,9 @@ import {
   fetchRecentTrades
 } from "./binance.js";
 import {
-  db,
   getStoredKlines,
   getStoredMetrics,
+  saveKline,
   saveKlines,
   saveMarketMetrics
 } from "./database.js";
@@ -63,7 +63,7 @@ export async function getMarketKlines(symbolValue, intervalValue, limitValue = 5
   }
 
   const stored = getStoredKlines(symbol, interval, limit, endTime);
-  if (stored.length > 0) return stored;
+  if (stored.length >= limit) return stored;
 
   const loadKey = `${symbol}:${interval}:${endTime || "latest"}`;
   if (klineLoads.has(loadKey)) return klineLoads.get(loadKey);
@@ -181,26 +181,7 @@ export function persistRealtimeKline(symbol, interval, kline) {
     isClosed: Boolean(kline.x)
   };
 
-  if (candle.isClosed) {
-    db.prepare(`
-      INSERT INTO klines (
-        symbol, interval, open_time, open, high, low, close, volume, close_time,
-        quote_volume, trade_count, taker_buy_base_volume, taker_buy_quote_volume,
-        is_closed, updated_at
-      ) VALUES (
-        @symbol, @interval, @openTime, @open, @high, @low, @close, @volume,
-        @closeTime, @quoteVolume, @tradeCount, @takerBuyBaseVolume,
-        @takerBuyQuoteVolume, 1, @updatedAt
-      )
-      ON CONFLICT(symbol, interval, open_time) DO UPDATE SET
-        high=excluded.high, low=excluded.low, close=excluded.close,
-        volume=excluded.volume, close_time=excluded.close_time,
-        quote_volume=excluded.quote_volume, trade_count=excluded.trade_count,
-        taker_buy_base_volume=excluded.taker_buy_base_volume,
-        taker_buy_quote_volume=excluded.taker_buy_quote_volume,
-        is_closed=1, updated_at=excluded.updated_at
-    `).run({ ...candle, updatedAt: Date.now() });
-  }
+  if (candle.isClosed) saveKline(candle);
 
   return candle;
 }
