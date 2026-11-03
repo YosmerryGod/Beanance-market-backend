@@ -217,7 +217,8 @@ const pruneKlines = db.prepare(`
 `);
 
 export const saveKline = db.transaction((kline) => {
-  upsertKline.run({ ...kline, updatedAt: Date.now() });
+  // [MODIFIED] SQLite does not accept JavaScript booleans; store isClosed as INTEGER.
+  upsertKline.run({ ...kline, isClosed: kline.isClosed ? 1 : 0, updatedAt: Date.now() });
   pruneKlines.run(kline.symbol, kline.interval, kline.symbol, kline.interval);
 });
 
@@ -226,7 +227,8 @@ export const saveKlines = db.transaction((klines) => {
   const touchedPairs = new Set();
 
   for (const kline of klines) {
-    upsertKline.run({ ...kline, updatedAt: now });
+    // [MODIFIED] SQLite does not accept JavaScript booleans; store isClosed as INTEGER.
+    upsertKline.run({ ...kline, isClosed: kline.isClosed ? 1 : 0, updatedAt: now });
     touchedPairs.add(`${kline.symbol}:${kline.interval}`);
   }
 
