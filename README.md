@@ -2,12 +2,13 @@
 
 Realtime market data service for Beanance, powered by Binance USDⓈ-M Perpetual Futures.
 
-The first release only includes active USDT-margined perpetual contracts. It does not place orders and does not require Binance API keys.
+The service exposes public market data only. It does not place orders, access user accounts, or require Binance API keys.
 
 ## Requirements
 
 - Node.js 20 or newer
 - npm
+- Build tools supported by `better-sqlite3` when a prebuilt binary is unavailable
 
 ## Setup
 
@@ -19,13 +20,9 @@ cp .env.example .env
 npm start
 ```
 
-The service listens on port `3030` by default.
+The service listens on port `3030` by default. SQLite is created automatically at `./data/beanance-market.db`.
 
 ## Market eligibility
-
-The service loads Binance USDⓈ-M exchange information from:
-
-`GET https://fapi.binance.com/fapi/v1/exchangeInfo`
 
 A contract is included only when all conditions match:
 
@@ -34,44 +31,35 @@ A contract is included only when all conditions match:
 - `quoteAsset === "USDT"`
 - `marginAsset === "USDT"`
 
-Initial 24-hour ticker data is loaded from:
+Exchange metadata is loaded from Binance `/fapi/v1/exchangeInfo`. Initial 24-hour ticker data is loaded from `/fapi/v1/ticker/24hr`.
 
-`GET https://fapi.binance.com/fapi/v1/ticker/24hr`
-
-Live updates are consumed from Binance's USDⓈ-M all-market ticker stream:
+The all-market ticker stream is shared by the backend:
 
 `wss://fstream.binance.com/market/stream?streams=!ticker@arr`
 
-Incoming ticker messages are matched against the active symbol set loaded from USDⓈ-M exchange information. This prevents non-USDT-M or inactive symbols from entering the Beanance market cache.
-
 ## REST API
 
-### Health
+All endpoints return JSON.
 
-`GET /health`
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Service, SQLite and stream health |
+| `GET /api/v1/market/futures` | Active USDT-M perpetual markets |
+| `GET /api/v1/market/futures/:symbol` | One market and its latest ticker |
+| `GET /api/v1/market/tickers` | Markets sorted by quote volume |
+| `GET /api/v1/market/top-movers?limit=20` | Top gainers and losers |
+| `GET /api/v1/market/futures/:symbol/klines?interval=1m&limit=500` | Historical OHLCV candles |
+| `GET /api/v1/market/futures/:symbol/depth?limit=20` | Current order book snapshot |
+| `GET /api/v1/market/futures/:symbol/trades?limit=50` | Recent public trades |
+| `GET /api/v1/market/futures/:symbol/metrics` | Mark/index price, funding rate and open interest |
 
-### Active futures markets
+### Kline parameters
 
-`GET /api/v1/market/futures`
+- Supported intervals: `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `8h`, `12h`, `1d`, `3d`, `1w`, `1M`
+- `limit`: 1–1500; defaults to 500
+- `endTime`: optional Unix timestamp in milliseconds
 
-Optional query parameters:
-
-- `sort=symbol|quoteVolume|priceChangePercent`
-- `order=asc|desc`
-
-### One futures market
-
-`GET /api/v1/market/futures/BTCUSDT`
-
-### Tickers sorted by quote volume
-
-`GET /api/v1/market/tickers`
-
-### Top movers
-
-`GET /api/v1/market/top-movers?limit=20`
-
-Returns separate `gainers` and `losers` arrays.
+The backend first checks SQLite. When the requested symbol/timeframe has no stored candles, it loads the requested history from Binance REST and stores it. Closed realtime candles are then upserted into SQLite.
 
 ## WebSocket
 
@@ -79,32 +67,70 @@ Connect to:
 
 `ws://localhost:3030/ws/market`
 
-The backend sends a full snapshot immediately after a client connects:
+The connection sends the existing `market.snapshot` message and continues to receive the existing `market.ticker` and `market.status` events.
+
+A client can subscribe to detail streams by sending:
 
 ```json
 {
-  "type": "market.snapshot",
-  "timestamp": 1793650000000,
-  "data": []
+  "type": "market.detail.subscribe",
+  "symbol": "BTCUSDT",
+  "streams": ["kline_1m", "depth20@100ms", "aggTrade"]
 }
 ```
 
-Then it broadcasts updates:
+Supported detail streams:
+
+- `kline_1m`
+- `kline_5m`
+- `kline_15m`
+- `kline_30m`
+- `kline_1h`
+- `kline_4h`
+- `kline_1d`
+- `depth20@100ms`
+- `aggTrade`
+
+The server acknowledges subscriptions with `market.detail.subscribed`. Realtime messages use event types such as:
+
+- `market.detail.kline`
+- `market.detail.depthUpdate`
+- `market.detail.aggTrade`
+
+Unsubscribe with:
 
 ```json
 {
-  "type": "market.ticker",
-  "timestamp": 1793650000000,
-  "data": {
-    "symbol": "BTCUSDT",
-    "lastPrice": 0,
-    "priceChangePercent": 0,
-    "quoteVolume": 0
-  }
+  "type": "market.detail.unsubscribe",
+  "symbol": "BTCUSDT",
+  "streams": ["kline_1m", "depth20@100ms", "aggTrade"]
 }
 ```
 
-Market metadata and ticker values are held in memory. REST exchange information and the initial ticker snapshot are refreshed every five minutes by default. Binance WebSocket reconnects automatically with exponential backoff.
+If a client disconnects, its subscriptions are released automatically.
+
+### WebSocket efficiency
+
+- The backend maintains one shared Binance detail WebSocket connection, not one Binance connection per frontend user.
+- Streams are subscribed upstream only while at least one frontend client needs them.
+- Multiple frontend clients share the same upstream stream.
+- The existing all-market ticker stream remains separate and unchanged.
+- Order book and trade data are sent only to clients subscribed to that symbol and stream.
+
+## SQLite storage
+
+SQLite uses WAL mode, normal synchronous mode, foreign keys, a busy timeout and prepared statements.
+
+Tables:
+
+- `markets`: active contract metadata
+- `tickers`: latest REST ticker snapshot
+- `klines`: historical and closed OHLCV candles
+- `market_metrics`: latest funding, mark/index price and open interest
+
+Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted; order book snapshots and individual trades remain transient.
+
+The database file and its WAL files are ignored by Git.
 
 ## Environment variables
 
@@ -119,10 +145,11 @@ Market metadata and ticker values are held in memory. REST exchange information 
 | `BINANCE_RECONNECT_BASE_DELAY_MS` | `1000` | Initial reconnect delay |
 | `BINANCE_RECONNECT_MAX_DELAY_MS` | `30000` | Maximum reconnect delay |
 | `MARKET_REFRESH_INTERVAL_MS` | `300000` | Exchange info and ticker refresh interval |
+| `SQLITE_PATH` | `./data/beanance-market.db` | SQLite database file path |
 
-## Important notes
+## Notes
 
-- All prices and volumes are normalized to JavaScript numbers for convenient frontend consumption.
+- Prices and volumes are normalized to JavaScript numbers.
 - The 24-hour percentage is Binance's rolling 24-hour ticker change, not a UTC-day percentage.
-- The WebSocket stream only emits changed ticker records. The backend cache retains the latest known value for each active market.
-- This service is public market data only. Trading, account data, API keys, and order execution are out of scope.
+- Funding and open-interest values are public market metrics, not trading signals.
+- Binance public API limits still apply. Frontend clients should reuse the backend endpoints and WebSocket rather than calling Binance directly.
