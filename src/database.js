@@ -256,6 +256,31 @@ export function getStoredKlines(symbol, interval, limit = 500, endTime = null) {
   }));
 }
 
+export function getStoredMarketSnapshot() {
+  return db.prepare(`
+    SELECT
+      m.symbol, m.pair, m.base_asset AS baseAsset,
+      m.quote_asset AS quoteAsset, m.margin_asset AS marginAsset,
+      m.contract_type AS contractType, m.status,
+      m.price_precision AS pricePrecision,
+      m.quantity_precision AS quantityPrecision,
+      m.onboard_date AS onboardDate, m.delivery_date AS deliveryDate,
+      t.price_change AS priceChange,
+      t.price_change_percent AS priceChangePercent,
+      t.weighted_avg_price AS weightedAvgPrice,
+      t.last_price AS lastPrice, t.last_quantity AS lastQuantity,
+      t.open_price AS openPrice, t.high_price AS highPrice,
+      t.low_price AS lowPrice, t.base_volume AS baseVolume,
+      t.quote_volume AS quoteVolume, t.open_time AS openTime,
+      t.close_time AS closeTime, t.trade_count AS tradeCount,
+      t.event_time AS eventTime
+    FROM markets m
+    LEFT JOIN tickers t ON t.symbol = m.symbol
+    WHERE m.status = 'TRADING'
+    ORDER BY m.symbol ASC
+  `).all();
+}
+
 export function getStoredMetrics(symbol) {
   const row = db.prepare("SELECT * FROM market_metrics WHERE symbol = ?").get(symbol);
   if (!row) return null;
