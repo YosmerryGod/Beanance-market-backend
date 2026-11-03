@@ -171,7 +171,6 @@ export const saveKline = db.transaction((kline) => {
   if (!isPersistableKline(kline)) return false;
   upsertKline.run({ ...kline, updatedAt: Date.now() });
   prunePair.run(kline.symbol, kline.interval, kline.symbol, kline.interval, config.database.pairRetention);
-  cachedKlineCount = countKlines.get().count;
   return true;
 });
 
@@ -189,7 +188,6 @@ export const saveKlines = db.transaction((klines) => {
     const [symbol, interval] = pair.split("\u0000");
     prunePair.run(symbol, interval, symbol, interval, config.database.pairRetention);
   }
-  if (saved) cachedKlineCount = countKlines.get().count;
   return saved;
 });
 
