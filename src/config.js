@@ -18,6 +18,7 @@ export const config = {
   host: process.env.HOST || "0.0.0.0",
   port: numberFromEnv("PORT", 3030),
   logLevel: process.env.LOG_LEVEL || "info",
+  sqlitePath: process.env.SQLITE_PATH || "./data/beanance-market.db",
   corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
   binanceRestBaseUrl: (
     process.env.BINANCE_REST_BASE_URL || "https://fapi.binance.com"
