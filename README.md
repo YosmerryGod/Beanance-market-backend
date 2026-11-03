@@ -128,7 +128,7 @@ Tables:
 - `klines`: historical and closed OHLCV candles
 - `market_metrics`: latest funding, mark/index price and open interest
 
-Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted; order book snapshots and individual trades remain transient.
+Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted, with a rolling retention limit of 2,000 candles per symbol/timeframe; order book snapshots and individual trades remain transient.
 
 The database file and its WAL files are ignored by Git.
 
