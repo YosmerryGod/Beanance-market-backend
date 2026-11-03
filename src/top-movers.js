@@ -170,10 +170,8 @@ async function seedPreviousCandles(symbols) {
   await Promise.all(workers);
 }
 
-function buildStreamUrl(symbols) {
-  const base = config.binanceWsBaseUrl.replace(/\/$/, "");
-  const streams = symbols.map((symbol) => `${symbol.toLowerCase()}@kline_1m`).join("/");
-  return `${base}?streams=${streams}`;
+function buildStreamUrl() {
+  return config.binanceWsBaseUrl.replace(/\/$/, "");
 }
 
 export async function startTopMovers() {
@@ -187,7 +185,20 @@ export async function startTopMovers() {
 
   socketManager = new ManagedWebSocket({
     name: "Binance top movers 1m",
-    url: buildStreamUrl(symbols),
+    url: buildStreamUrl(),
+    onOpen: async (socket) => {
+      const streams = symbols.map((symbol) => `${symbol.toLowerCase()}@kline_1m`);
+      for (let index = 0; index < streams.length; index += 100) {
+        socket.send(JSON.stringify({
+          method: "SUBSCRIBE",
+          params: streams.slice(index, index + 100),
+          id: index + 1
+        }));
+        if (index + 100 < streams.length) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+      }
+    },
     onMessage: applyKlineMessage,
     onClose: () => { lastError = "Binance 1m kline stream disconnected"; }
   });
