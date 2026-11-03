@@ -88,6 +88,12 @@ db.exec(`
     ON tickers(quote_volume DESC);
 `);
 
+db.exec("CREATE TEMP TABLE IF NOT EXISTS active_market_symbols (symbol TEXT PRIMARY KEY)");
+
+const insertActiveMarket = db.prepare(
+  "INSERT OR IGNORE INTO active_market_symbols (symbol) VALUES (?)"
+);
+
 const upsertMarket = db.prepare(`
   INSERT INTO markets (
     symbol, pair, base_asset, quote_asset, margin_asset, contract_type,
@@ -175,9 +181,18 @@ const upsertMetric = db.prepare(`
 
 export const saveMarkets = db.transaction((markets) => {
   const now = Date.now();
+  db.prepare("DELETE FROM active_market_symbols").run();
+
   for (const market of markets) {
     upsertMarket.run({ ...market, updatedAt: now });
+    insertActiveMarket.run(market.symbol);
   }
+
+  db.prepare(`
+    DELETE FROM markets
+    WHERE symbol NOT IN (SELECT symbol FROM active_market_symbols)
+  `).run();
+  db.prepare("DELETE FROM active_market_symbols").run();
 });
 
 export const saveTicker = (ticker) => {
