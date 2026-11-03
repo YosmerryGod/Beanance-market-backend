@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import WebSocket, { WebSocketServer } from "ws";
 import { config } from "./config.js";
+import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
 import { getDatabaseStatus } from "./database.js";
 import { getMarketDepth, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
@@ -123,6 +124,7 @@ app.get("/health", async () => ({
   timestamp: Date.now(),
   market: getMarketStatus(),
   database: getDatabaseStatus(),
+  binanceRest: getBinanceRestStatus(),
   detailStreams: getDetailStreamStatus()
 }));
 
@@ -236,7 +238,7 @@ websocketServer.on("connection", (socket) => {
       sendJson(socket, {
         type: "market.detail.unsubscribed",
         symbol,
-        streams: removed.map((name) => name.slice(name.indexOf("@") + 1)),
+        streams: removed,
         timestamp: Date.now()
       });
     }
