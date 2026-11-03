@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
 import { getDatabaseStatus } from "./database.js";
+import { getTopMovers, getTopMoversStatus } from "./top-movers.js";
 import { getMarketDepth, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
 import {
   getDetailStreamStatus,
@@ -37,6 +38,7 @@ const depthLastSentAt = new WeakMap();
 const messageWindows = new WeakMap();
 let marketFlushTimer = null;
 let heartbeatTimer = null;
+let topMoversTimer = null;
 
 function sendJson(socket, payload) {
   if (socket.readyState !== WebSocket.OPEN) return false;
@@ -125,7 +127,8 @@ app.get("/health", async () => ({
   market: getMarketStatus(),
   database: getDatabaseStatus(),
   binanceRest: getBinanceRestStatus(),
-  detailStreams: getDetailStreamStatus()
+  detailStreams: getDetailStreamStatus(),
+  topMovers: getTopMoversStatus()
 }));
 
 app.get("/api/v1/market/futures", async (request) => {
@@ -181,10 +184,16 @@ app.get("/api/v1/market/tickers", async () => {
 
 app.get("/api/v1/market/top-movers", async (request) => {
   const limit = parseLimit(request.query.limit);
-  const withTicker = getMarkets().filter((market) => typeof market.priceChangePercent === "number");
-  const gainers = [...withTicker].sort((a, b) => b.priceChangePercent - a.priceChangePercent).slice(0, limit);
-  const losers = [...withTicker].sort((a, b) => a.priceChangePercent - b.priceChangePercent).slice(0, limit);
-  return { success: true, updatedAt: getMarketStatus().lastUpdateAt, data: { gainers, losers } };
+  const events = getTopMovers(limit);
+  const gainers = events.filter((item) => item.positive);
+  const losers = events.filter((item) => !item.positive);
+  return {
+    success: true,
+    updatedAt: Date.now(),
+    interval: "1m",
+    data: { events, gainers, losers },
+    meta: getTopMoversStatus()
+  };
 });
 
 function isMessageRateAllowed(socket) {
@@ -203,6 +212,7 @@ websocketServer.on("connection", (socket) => {
   socket.on("pong", () => { socket.isAlive = true; });
 
   sendJson(socket, { type: "market.snapshot", timestamp: Date.now(), data: getMarkets() });
+  sendJson(socket, { type: "market.top-movers", timestamp: Date.now(), data: { events: getTopMovers(50) } });
 
   socket.on("message", (raw) => {
     if (!isMessageRateAllowed(socket)) {
@@ -294,6 +304,16 @@ export function publishMarketStatus(status) {
 
 export async function startHttpServer() {
   await app.listen({ host: config.host, port: config.port });
+  topMoversTimer = setInterval(() => {
+    if (!websocketServer.clients.size) return;
+    broadcast({
+      type: "market.top-movers",
+      timestamp: Date.now(),
+      data: { events: getTopMovers(50) }
+    });
+  }, 1000);
+  topMoversTimer.unref?.();
+
   heartbeatTimer = setInterval(() => {
     for (const client of websocketServer.clients) {
       if (client.isAlive === false) {
@@ -310,8 +330,10 @@ export async function startHttpServer() {
 
 export async function stopHttpServer() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
+  if (topMoversTimer) clearInterval(topMoversTimer);
   if (marketFlushTimer) clearTimeout(marketFlushTimer);
   heartbeatTimer = null;
+  topMoversTimer = null;
   marketFlushTimer = null;
   pendingMarketUpdates.clear();
   for (const client of websocketServer.clients) {
