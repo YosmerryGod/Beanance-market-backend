@@ -125,6 +125,7 @@ const pruneGlobal = db.prepare(`
 let persistedSymbols = new Set();
 let maintenanceTimer = null;
 let cachedKlineCount = countKlines.get().count;
+let lastCountRefreshAt = Date.now();
 let lastMaintenanceAt = null;
 
 export function setPersistedSymbols(symbols) {
@@ -246,6 +247,7 @@ export function runDatabaseMaintenance() {
   db.pragma("wal_checkpoint(PASSIVE)");
   db.pragma("optimize");
   cachedKlineCount = countKlines.get().count;
+  lastCountRefreshAt = Date.now();
   lastMaintenanceAt = Date.now();
   const totalBytes = fileSize(databasePath) + fileSize(`${databasePath}-wal`);
   return { klineCount: cachedKlineCount, totalBytes, maxBytes: config.database.maxDatabaseMb * 1048576 };
@@ -268,6 +270,10 @@ export function startDatabaseMaintenance() {
 }
 
 export function getDatabaseStatus() {
+  if (Date.now() - lastCountRefreshAt >= 60000) {
+    cachedKlineCount = countKlines.get().count;
+    lastCountRefreshAt = Date.now();
+  }
   const totalBytes = fileSize(databasePath) + fileSize(`${databasePath}-wal`);
   return {
     path: config.sqlitePath,
