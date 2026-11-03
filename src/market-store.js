@@ -10,6 +10,7 @@ let symbolsBySymbol = new Map();
 let lastSnapshotAt = null;
 let lastUpdateAt = null;
 let lastSource = "initializing";
+let lastCacheInvalidationAt = 0;
 const sortedCache = new Map();
 const SORT_CACHE_TTL_MS = 500;
 
@@ -40,8 +41,11 @@ function normalizeTicker(ticker) {
   };
 }
 
-function invalidateSortedCache() {
+function invalidateSortedCache(force = false) {
+  const now = Date.now();
+  if (!force && now - lastCacheInvalidationAt < SORT_CACHE_TTL_MS) return;
   sortedCache.clear();
+  lastCacheInvalidationAt = now;
 }
 
 function mergeMarketItem(symbolInfo, tickerInfo = {}) {
@@ -95,16 +99,18 @@ export function hydrateMarketStore() {
   }
 
   if (rows.length) {
+    setPersistedSymbols([...rows].sort((a, b) => (b.quoteVolume ?? 0) - (a.quoteVolume ?? 0)).map((item) => item.symbol));
     lastUpdateAt = Date.now();
     lastSource = "sqlite";
   }
-  invalidateSortedCache();
+  invalidateSortedCache(true);
   return rows.length;
 }
 
 export function replaceSymbols(symbols) {
   symbolsBySymbol = new Map(symbols.map((symbol) => [symbol.symbol, symbol]));
   saveMarkets(symbols);
+  setPersistedSymbols(symbols.map((item) => item.symbol));
 
   for (const [symbol, current] of marketBySymbol.entries()) {
     const symbolInfo = symbolsBySymbol.get(symbol);
@@ -115,7 +121,7 @@ export function replaceSymbols(symbols) {
     marketBySymbol.set(symbol, mergeMarketItem(symbolInfo, current));
   }
   lastUpdateAt = Date.now();
-  invalidateSortedCache();
+  invalidateSortedCache(true);
 }
 
 export function applyTicker(ticker) {
