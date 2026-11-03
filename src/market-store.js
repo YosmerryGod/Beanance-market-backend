@@ -1,3 +1,5 @@
+import { saveMarkets, saveTickers } from "./database.js";
+
 const marketBySymbol = new Map();
 let symbolsBySymbol = new Map();
 let lastSnapshotAt = null;
@@ -42,6 +44,7 @@ function mergeMarketItem(symbolInfo, tickerInfo = {}) {
 
 export function replaceSymbols(symbols) {
   symbolsBySymbol = new Map(symbols.map((symbol) => [symbol.symbol, symbol]));
+  saveMarkets(symbols);
 
   for (const [symbol, current] of marketBySymbol.entries()) {
     const symbolInfo = symbolsBySymbol.get(symbol);
@@ -84,6 +87,7 @@ export function applyTickerSnapshot(tickers) {
     if (item) updated.push(item);
   }
 
+  saveTickers(updated);
   lastSnapshotAt = Date.now();
   lastSource = "rest";
   return updated;
