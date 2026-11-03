@@ -163,7 +163,8 @@ function isPersistableKline(kline) {
     config.database.allowedIntervals.includes(kline.interval) &&
     Number.isFinite(kline.openTime) &&
     Number.isFinite(kline.closeTime) &&
-    kline.closeTime >= Date.now() - config.database.retentionDays * 86400000 &&\n    kline.closeTime < Date.now()
+    kline.closeTime >= Date.now() - config.database.retentionDays * 86400000 &&
+    kline.closeTime < Date.now()
   );
 }
 
