@@ -153,3 +153,29 @@ The database file and its WAL files are ignored by Git.
 - The 24-hour percentage is Binance's rolling 24-hour ticker change, not a UTC-day percentage.
 - Funding and open-interest values are public market metrics, not trading signals.
 - Binance public API limits still apply. Frontend clients should reuse the backend endpoints and WebSocket rather than calling Binance directly.
+
+## Resource controls (updated)
+
+Binance REST requests now pass through one central queue with bounded concurrency, estimated request-weight budgeting, request deduplication, endpoint-specific response caching, and a shared cooldown after HTTP 429/418. Retry is limited to server-side 5xx responses.
+
+WebSocket connections use a shared lifecycle manager with exponential reconnect backoff and jitter, heartbeat/stale detection, and clean shutdown. Frontend detail subscriptions are indexed once and shared across clients. Default limits are 100 frontend clients, 20 detail subscriptions per client, and 800 active upstream streams.
+
+Market ticker fanout is batched every 500 ms while preserving the existing market.ticker event shape. Slow clients are disconnected when their outbound buffer exceeds the configured limit. Depth updates are throttled per client.
+
+SQLite stores only closed candles for the highest-volume 100 symbols and configured timeframes. Default retention is 2,000 candles per symbol/timeframe, 300,000 kline rows globally, and 30 days. A scheduled maintenance task prunes expired and excess rows and checkpoints the WAL.
+
+Use ecosystem.config.cjs to run the service with PM2 memory and restart limits. Install pm2-logrotate and configure a 10 MB log size with seven retained files. Deployment log files are also pruned to the latest ten.
+
+See .env.example for all queue, cache, WebSocket, HTTP rate-limit, and SQLite limits.
+### PM2 commands
+
+First-time setup:
+
+    pm2 startOrReload ecosystem.config.cjs --update-env
+    pm2 save
+    pm2 install pm2-logrotate
+    pm2 set pm2-logrotate:max_size 10M
+    pm2 set pm2-logrotate:retain 7
+    pm2 set pm2-logrotate:compress true
+
+Subsequent deployments use node deploy.js. The deployment script pulls the selected branch, adds missing environment variables without replacing existing values, installs production dependencies, applies the PM2 ecosystem configuration, and checks /health.
