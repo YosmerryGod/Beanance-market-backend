@@ -39,10 +39,12 @@ function applyKlineMessage(message) {
   if (!symbol || !kline || kline.i !== "1m") return;
 
   const current = normalizeCandle(symbol, kline);
-  const previous = candleBySymbol.get(symbol)?.current;
   const existing = candleBySymbol.get(symbol);
+  const priorCandle = existing?.current && existing.current.openTime < current.openTime
+    ? existing.current
+    : existing?.previous || null;
   candleBySymbol.set(symbol, {
-    previous: current.isClosed ? current : existing?.previous || previous || null,
+    previous: current.isClosed ? current : priorCandle,
     current
   });
   lastMessageAt = Date.now();
