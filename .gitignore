@@ -5,3 +5,8 @@ node_modules/
 npm-debug.log*
 .DS_Store
 coverage/
+
+# [ADDED] SQLite database and WAL files
+data/*.db
+data/*.db-shm
+data/*.db-wal

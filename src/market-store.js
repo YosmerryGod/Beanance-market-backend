@@ -1,3 +1,9 @@
+import {
+  getStoredMarketSnapshot,
+  saveMarkets,
+  saveTickers
+} from "./database.js";
+
 const marketBySymbol = new Map();
 let symbolsBySymbol = new Map();
 let lastSnapshotAt = null;
@@ -40,8 +46,58 @@ function mergeMarketItem(symbolInfo, tickerInfo = {}) {
   };
 }
 
+export function hydrateMarketStore() {
+  const rows = getStoredMarketSnapshot();
+  symbolsBySymbol = new Map();
+
+  for (const row of rows) {
+    const symbolInfo = {
+      symbol: row.symbol,
+      pair: row.pair,
+      baseAsset: row.baseAsset,
+      quoteAsset: row.quoteAsset,
+      marginAsset: row.marginAsset,
+      contractType: row.contractType,
+      status: row.status,
+      pricePrecision: row.pricePrecision,
+      quantityPrecision: row.quantityPrecision,
+      onboardDate: row.onboardDate,
+      deliveryDate: row.deliveryDate
+    };
+
+    const tickerInfo = {
+      symbol: row.symbol,
+      priceChange: row.priceChange,
+      priceChangePercent: row.priceChangePercent,
+      weightedAvgPrice: row.weightedAvgPrice,
+      lastPrice: row.lastPrice,
+      lastQuantity: row.lastQuantity,
+      openPrice: row.openPrice,
+      highPrice: row.highPrice,
+      lowPrice: row.lowPrice,
+      baseVolume: row.baseVolume,
+      quoteVolume: row.quoteVolume,
+      openTime: row.openTime,
+      closeTime: row.closeTime,
+      tradeCount: row.tradeCount,
+      eventTime: row.eventTime
+    };
+
+    symbolsBySymbol.set(row.symbol, symbolInfo);
+    marketBySymbol.set(row.symbol, mergeMarketItem(symbolInfo, tickerInfo));
+  }
+
+  if (rows.length) {
+    lastUpdateAt = Date.now();
+    lastSource = "sqlite";
+  }
+
+  return rows.length;
+}
+
 export function replaceSymbols(symbols) {
   symbolsBySymbol = new Map(symbols.map((symbol) => [symbol.symbol, symbol]));
+  saveMarkets(symbols);
 
   for (const [symbol, current] of marketBySymbol.entries()) {
     const symbolInfo = symbolsBySymbol.get(symbol);
@@ -84,6 +140,7 @@ export function applyTickerSnapshot(tickers) {
     if (item) updated.push(item);
   }
 
+  saveTickers(updated);
   lastSnapshotAt = Date.now();
   lastSource = "rest";
   return updated;

@@ -1,4 +1,6 @@
 import WebSocket from "ws";
+import { closeDatabase } from "./database.js";
+import { stopDetailStreams } from "./detail-stream.js";
 import { config } from "./config.js";
 import {
   createBinanceWebSocketUrl,
@@ -9,6 +11,7 @@ import {
   applyTicker,
   applyTickerSnapshot,
   getMarketStatus,
+  hydrateMarketStore,
   replaceSymbols
 } from "./market-store.js";
 import {
@@ -124,6 +127,11 @@ function connectToBinance() {
 }
 
 async function bootstrap() {
+  const restoredMarkets = hydrateMarketStore();
+  if (restoredMarkets) {
+    console.log(`Restored ${restoredMarkets} markets from SQLite`);
+  }
+
   await startHttpServer();
 
   try {
@@ -163,7 +171,9 @@ async function shutdown(signal) {
     }
   }
 
+  stopDetailStreams();
   await stopHttpServer();
+  closeDatabase();
   process.exit(0);
 }
 
