@@ -33,6 +33,53 @@ function run(name, command, args) {
   log(`SUCCESS: ${name}`);
 }
 
+// [ADDED] Add variables from .env.example that are missing in .env.
+// Existing production values are preserved and never overwritten.
+function syncEnvFromExample() {
+  const projectPath = path.resolve(PROJECT_DIR);
+  const envPath = path.join(projectPath, ".env");
+  const examplePath = path.join(projectPath, ".env.example");
+
+  if (!fs.existsSync(examplePath)) {
+    throw new Error(`.env.example not found: ${examplePath}`);
+  }
+
+  const exampleContent = fs.readFileSync(examplePath, "utf8");
+  if (!fs.existsSync(envPath)) {
+    fs.copyFileSync(examplePath, envPath, fs.constants.COPYFILE_EXCL);
+    log("Created .env from .env.example because .env did not exist.");
+    return;
+  }
+
+  const currentContent = fs.readFileSync(envPath, "utf8");
+  const existingKeys = new Set(
+    currentContent
+      .split(/\r?\n/)
+      .map((line) => line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/))
+      .filter(Boolean)
+      .map((match) => match[1])
+  );
+
+  const missingLines = exampleContent
+    .split(/\r?\n/)
+    .filter((line) => {
+      const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      if (!match || existingKeys.has(match[1])) return false;
+      existingKeys.add(match[1]);
+      return true;
+    });
+
+  if (missingLines.length === 0) {
+    log(".env already contains every variable defined in .env.example.");
+    return;
+  }
+
+  const separator = currentContent.length === 0 || currentContent.endsWith("\n") ? "" : "\n";
+  const addition = `${separator}\n# [ADDED] Missing variables synchronized from .env.example during deployment.\n${missingLines.join("\n")}\n`;
+  fs.appendFileSync(envPath, addition, "utf8");
+  log(`Added ${missingLines.length} missing variable(s) from .env.example to .env. Existing values were preserved.`);
+}
+
 async function verifyHealth() {
   const url = `http://127.0.0.1:${APP_PORT}/health`;
   for (let attempt = 1; attempt <= 30; attempt += 1) {
@@ -78,6 +125,8 @@ async function main() {
   log(`Deployment log: ${logFile}`);
 
   run("Git pull", "git", ["pull", "--ff-only", "origin", BRANCH]);
+  // [ADDED] Synchronize missing environment variables before dependency install and PM2 restart.
+  syncEnvFromExample();
   run("Install production dependencies", "npm", ["install", "--omit=dev", "--no-package-lock"]);
   run("Restart backend with PM2", "pm2", ["restart", PM2_TARGET, "--update-env"]);
   await verifyHealth();
