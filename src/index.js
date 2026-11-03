@@ -11,6 +11,7 @@ import {
   applyTicker,
   applyTickerSnapshot,
   getMarketStatus,
+  hydrateMarketStore,
   replaceSymbols
 } from "./market-store.js";
 import {
@@ -126,6 +127,11 @@ function connectToBinance() {
 }
 
 async function bootstrap() {
+  const restoredMarkets = hydrateMarketStore();
+  if (restoredMarkets) {
+    console.log(`Restored ${restoredMarkets} markets from SQLite`);
+  }
+
   await startHttpServer();
 
   try {
