@@ -1,176 +1,74 @@
-import WebSocket from "ws";
-import { closeDatabase } from "./database.js";
+import { closeDatabase, startDatabaseMaintenance } from "./database.js";
 import { stopDetailStreams } from "./detail-stream.js";
 import { config } from "./config.js";
-import {
-  createBinanceWebSocketUrl,
-  fetchAll24hrTickers,
-  fetchExchangeInfo
-} from "./binance.js";
-import {
-  applyTicker,
-  applyTickerSnapshot,
-  getMarketStatus,
-  hydrateMarketStore,
-  replaceSymbols
-} from "./market-store.js";
-import {
-  publishMarketStatus,
-  publishMarketUpdate,
-  startHttpServer,
-  stopHttpServer
-} from "./server.js";
+import { createBinanceWebSocketUrl, fetchAll24hrTickers, fetchExchangeInfo } from "./binance.js";
+import { applyTicker, applyTickerSnapshot, getMarketStatus, hydrateMarketStore, replaceSymbols } from "./market-store.js";
+import { publishMarketStatus, publishMarketUpdate, startHttpServer, stopHttpServer } from "./server.js";
+import { ManagedWebSocket } from "./websocket-manager.js";
 
-let binanceSocket = null;
-let reconnectTimer = null;
 let refreshTimer = null;
-let reconnectAttempts = 0;
+let refreshInProgress = false;
 let shuttingDown = false;
 
+const marketSocket = new ManagedWebSocket({
+  name: "Binance market",
+  url: createBinanceWebSocketUrl(),
+  onMessage: handleBinancePayload,
+  onOpen: () => publishMarketStatus({ ...getMarketStatus(), connection: "connected" }),
+  onClose: () => publishMarketStatus({ ...getMarketStatus(), connection: "disconnected" })
+});
+
 async function refreshMarketData() {
-  const symbols = await fetchExchangeInfo();
-  replaceSymbols(symbols);
-
-  const tickers = await fetchAll24hrTickers();
-  applyTickerSnapshot(tickers);
-
-  const status = getMarketStatus();
-  publishMarketStatus({
-    ...status,
-    connection: binanceSocket?.readyState === WebSocket.OPEN
-      ? "connected"
-      : "disconnected"
-  });
-
-  console.log(
-    `Loaded ${status.marketCount} active USDT-M perpetual markets and ${status.tickerCount} tickers`
-  );
-}
-
-function scheduleReconnect() {
-  if (shuttingDown || reconnectTimer) return;
-
-  const exponentialDelay = Math.min(
-    config.reconnectBaseDelayMs * 2 ** reconnectAttempts,
-    config.reconnectMaxDelayMs
-  );
-  const jitter = Math.floor(Math.random() * 500);
-  const delay = exponentialDelay + jitter;
-
-  reconnectAttempts += 1;
-
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectToBinance();
-  }, delay);
-
-  console.warn(`Binance WebSocket reconnect scheduled in ${delay}ms`);
+  if (refreshInProgress) return;
+  refreshInProgress = true;
+  try {
+    const symbols = await fetchExchangeInfo();
+    replaceSymbols(symbols);
+    const tickers = await fetchAll24hrTickers();
+    applyTickerSnapshot(tickers);
+    const status = getMarketStatus();
+    publishMarketStatus({ ...status, connection: marketSocket.connected ? "connected" : "disconnected" });
+    console.info(`Loaded ${status.marketCount} active USDT-M perpetual markets and ${status.tickerCount} tickers`);
+  } finally {
+    refreshInProgress = false;
+  }
 }
 
 function handleBinancePayload(payload) {
   const data = payload?.data ?? payload;
   const tickers = Array.isArray(data) ? data : [data];
-
   for (const ticker of tickers) {
     const market = applyTicker(ticker);
-
-    if (market) {
-      publishMarketUpdate(market);
-    }
+    if (market) publishMarketUpdate(market);
   }
-}
-
-function connectToBinance() {
-  if (shuttingDown) return;
-
-  const url = createBinanceWebSocketUrl();
-  console.log(`Connecting to Binance market stream: ${url}`);
-
-  binanceSocket = new WebSocket(url, {
-    handshakeTimeout: 15000
-  });
-
-  binanceSocket.on("open", () => {
-    reconnectAttempts = 0;
-    console.log("Connected to Binance USD-M market stream");
-
-    publishMarketStatus({
-      ...getMarketStatus(),
-      connection: "connected"
-    });
-  });
-
-  binanceSocket.on("message", (rawMessage) => {
-    try {
-      handleBinancePayload(JSON.parse(rawMessage.toString()));
-    } catch (error) {
-      console.error("Failed to process Binance market message:", error);
-    }
-  });
-
-  binanceSocket.on("error", (error) => {
-    console.error("Binance WebSocket error:", error.message);
-  });
-
-  binanceSocket.on("close", (code, reason) => {
-    console.warn(
-      `Binance WebSocket closed: ${code} ${reason.toString()}`
-    );
-
-    publishMarketStatus({
-      ...getMarketStatus(),
-      connection: "disconnected"
-    });
-
-    scheduleReconnect();
-  });
 }
 
 async function bootstrap() {
-  const restoredMarkets = hydrateMarketStore();
-  if (restoredMarkets) {
-    console.log(`Restored ${restoredMarkets} markets from SQLite`);
-  }
-
+  const restored = hydrateMarketStore();
+  if (restored) console.info(`Restored ${restored} markets from SQLite`);
+  startDatabaseMaintenance();
   await startHttpServer();
 
   try {
     await refreshMarketData();
   } catch (error) {
-    console.error("Initial Binance market snapshot failed:", error);
-    console.warn("The API will stay online and retry on the next refresh cycle");
+    console.error("Initial Binance market snapshot failed:", error.message);
+    console.warn("The API remains online and will retry during the next refresh cycle");
   }
 
-  connectToBinance();
-
-  refreshTimer = setInterval(async () => {
-    try {
-      await refreshMarketData();
-    } catch (error) {
-      console.error("Scheduled market refresh failed:", error);
-    }
+  marketSocket.connect();
+  refreshTimer = setInterval(() => {
+    refreshMarketData().catch((error) => console.error("Scheduled market refresh failed:", error.message));
   }, config.marketRefreshIntervalMs);
+  refreshTimer.unref?.();
 }
 
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-
-  console.log(`Received ${signal}; shutting down Beanance Market Backend`);
-
+  console.info(`Received ${signal}; shutting down Beanance Market Backend`);
   if (refreshTimer) clearInterval(refreshTimer);
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-
-  if (binanceSocket) {
-    binanceSocket.removeAllListeners();
-    if (
-      binanceSocket.readyState === WebSocket.OPEN ||
-      binanceSocket.readyState === WebSocket.CONNECTING
-    ) {
-      binanceSocket.close();
-    }
-  }
-
+  marketSocket.stop();
   stopDetailStreams();
   await stopHttpServer();
   closeDatabase();
