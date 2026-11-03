@@ -13,7 +13,7 @@ let queueTimer = null;
 const endpointWeights = {
   "/fapi/v1/exchangeInfo": 1,
   "/fapi/v1/ticker/24hr": 40,
-  "/fapi/v1/klines": 2,
+  "/fapi/v1/klines": 1,
   "/fapi/v1/depth": 5,
   "/fapi/v1/trades": 5,
   "/fapi/v1/premiumIndex": 1,
