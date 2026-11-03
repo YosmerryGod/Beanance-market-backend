@@ -114,7 +114,7 @@ const prunePair = db.prepare(`
     SELECT open_time FROM klines WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?
   )
 `);
-const pruneExpired = db.prepare("DELETE FROM klines WHERE updated_at < ?");
+const pruneExpired = db.prepare("DELETE FROM klines WHERE open_time < ?");
 const countKlines = db.prepare("SELECT COUNT(*) AS count FROM klines");
 const pruneGlobal = db.prepare(`
   DELETE FROM klines WHERE rowid IN (
@@ -163,7 +163,7 @@ function isPersistableKline(kline) {
     config.database.allowedIntervals.includes(kline.interval) &&
     Number.isFinite(kline.openTime) &&
     Number.isFinite(kline.closeTime) &&
-    kline.closeTime < Date.now()
+    kline.closeTime >= Date.now() - config.database.retentionDays * 86400000 &&\n    kline.closeTime < Date.now()
   );
 }
 
