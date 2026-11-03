@@ -15,11 +15,11 @@ const APP_PORT = Number(process.env.APP_PORT || 3030);
 const LOG_DIR = process.env.DEPLOY_LOG_DIR || "/var/log/beanance-market-deploy";
 
 function log(message) {
-  process.stdout.write(\`[\${new Date().toISOString()}] \${message}\n\`);
+  process.stdout.write(`[${new Date().toISOString()}] ${message}\n`);
 }
 
 function run(name, command, args) {
-  log(\`START: \${name}\`);
+  log(`START: ${name}`);
   const result = spawnSync(command, args, {
     cwd: path.resolve(PROJECT_DIR),
     stdio: "inherit",
@@ -27,9 +27,9 @@ function run(name, command, args) {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error(\`\${name} exited with code \${result.status}\`);
+    throw new Error(`${name} exited with code ${result.status}`);
   }
-  log(\`SUCCESS: \${name}\`);
+  log(`SUCCESS: ${name}`);
 }
 
 // [ADDED] Add variables from .env.example that are missing in .env.
@@ -40,7 +40,7 @@ function syncEnvFromExample() {
   const examplePath = path.join(projectPath, ".env.example");
 
   if (!fs.existsSync(examplePath)) {
-    throw new Error(\`.env.example not found: \${examplePath}\`);
+    throw new Error(`.env.example not found: ${examplePath}`);
   }
 
   const exampleContent = fs.readFileSync(examplePath, "utf8");
@@ -74,26 +74,26 @@ function syncEnvFromExample() {
   }
 
   const separator = currentContent.length === 0 || currentContent.endsWith("\n") ? "" : "\n";
-  const addition = \`\${separator}\n# [ADDED] Missing variables synchronized from .env.example during deployment.\n\${missingLines.join("\n")}\n\`;
+  const addition = `${separator}\n# [ADDED] Missing variables synchronized from .env.example during deployment.\n${missingLines.join("\n")}\n`;
   fs.appendFileSync(envPath, addition, "utf8");
-  log(\`Added \${missingLines.length} missing variable(s) from .env.example to .env. Existing values were preserved.\`);
+  log(`Added ${missingLines.length} missing variable(s) from .env.example to .env. Existing values were preserved.`);
 }
 
 async function verifyHealth() {
-  const url = \`http://127.0.0.1:\${APP_PORT}/health\`;
+  const url = `http://127.0.0.1:${APP_PORT}/health`;
   for (let attempt = 1; attempt <= 30; attempt += 1) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
       if (response.ok) {
         const payload = await response.json();
         if (payload?.success === true && payload?.status === "ok") {
-          log(\`HEALTH CHECK OK: HTTP \${response.status}\`);
+          log(`HEALTH CHECK OK: HTTP ${response.status}`);
           return;
         }
       }
-      log(\`Health check attempt \${attempt}: HTTP \${response.status}\`);
+      log(`Health check attempt ${attempt}: HTTP ${response.status}`);
     } catch (error) {
-      log(\`Health check attempt \${attempt}: \${error.message}\`);
+      log(`Health check attempt ${attempt}: ${error.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
@@ -103,14 +103,14 @@ async function verifyHealth() {
 async function main() {
   const projectPath = path.resolve(PROJECT_DIR);
   if (!fs.existsSync(path.join(projectPath, ".git"))) {
-    throw new Error(\`Git repository not found: \${projectPath}\`);
+    throw new Error(`Git repository not found: ${projectPath}`);
   }
 
   fs.mkdirSync(LOG_DIR, { recursive: true });
   // [ADDED] Keep only the newest deployment logs to prevent unbounded disk usage.
   const oldLogs = fs.readdirSync(LOG_DIR).filter((name) => name.startsWith("deploy-") && name.endsWith(".log")).sort();
   for (const name of oldLogs.slice(0, Math.max(0, oldLogs.length - 9))) fs.rmSync(path.join(LOG_DIR, name), { force: true });
-  const logFile = path.join(LOG_DIR, \`deploy-\${new Date().toISOString().replace(/[:.]/g, "-")}.log\`);
+  const logFile = path.join(LOG_DIR, `deploy-${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
   const startedAt = Date.now();
   const originalOut = process.stdout.write.bind(process.stdout);
   const originalErr = process.stderr.write.bind(process.stderr);
@@ -122,9 +122,9 @@ async function main() {
   process.stdout.write = (chunk, encoding, callback) => append(originalOut, chunk, encoding, callback);
   process.stderr.write = (chunk, encoding, callback) => append(originalErr, chunk, encoding, callback);
 
-  log(\`Deployment started in \${projectPath}\`);
-  log(\`Branch: \${BRANCH}; PM2 ecosystem: ecosystem.config.cjs; port: \${APP_PORT}\`);
-  log(\`Deployment log: \${logFile}\`);
+  log(`Deployment started in ${projectPath}`);
+  log(`Branch: ${BRANCH}; PM2 ecosystem: ecosystem.config.cjs; port: ${APP_PORT}`);
+  log(`Deployment log: ${logFile}`);
 
   run("Git pull", "git", ["pull", "--ff-only", "origin", BRANCH]);
   // [ADDED] Synchronize missing environment variables before dependency install and PM2 restart.
@@ -133,10 +133,10 @@ async function main() {
   run("Start or reload backend with PM2", "pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"]);
   await verifyHealth();
 
-  log(\`DEPLOYMENT SUCCESS in \${((Date.now() - startedAt) / 1000).toFixed(1)} seconds\`);
+  log(`DEPLOYMENT SUCCESS in ${((Date.now() - startedAt) / 1000).toFixed(1)} seconds`);
 }
 
 main().catch((error) => {
-  process.stderr.write(\`DEPLOYMENT FAILED: \${error.stack || error.message}\n\`);
+  process.stderr.write(`DEPLOYMENT FAILED: ${error.stack || error.message}\n`);
   process.exit(1);
 });
