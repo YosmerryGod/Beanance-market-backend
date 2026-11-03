@@ -1,5 +1,6 @@
 import { closeDatabase, startDatabaseMaintenance } from "./database.js";
 import { stopDetailStreams } from "./detail-stream.js";
+import { startTopMovers, stopTopMovers } from "./top-movers.js";
 import { config } from "./config.js";
 import { createBinanceWebSocketUrl, fetchAll24hrTickers, fetchExchangeInfo } from "./binance.js";
 import { applyTicker, applyTickerSnapshot, getMarketStatus, hydrateMarketStore, replaceSymbols } from "./market-store.js";
@@ -57,6 +58,7 @@ async function bootstrap() {
   }
 
   marketSocket.connect();
+  startTopMovers().catch((error) => console.error("Top Movers 1m stream failed to start:", error.message));
   refreshTimer = setInterval(() => {
     refreshMarketData().catch((error) => console.error("Scheduled market refresh failed:", error.message));
   }, config.marketRefreshIntervalMs);
@@ -69,6 +71,7 @@ async function shutdown(signal) {
   console.info(`Received ${signal}; shutting down Beanance Market Backend`);
   if (refreshTimer) clearInterval(refreshTimer);
   marketSocket.stop();
+  stopTopMovers();
   stopDetailStreams();
   await stopHttpServer();
   closeDatabase();
