@@ -11,7 +11,6 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = process.env.PROJECT_DIR || SCRIPT_DIR;
 const BRANCH = process.env.BRANCH || "main";
-const PM2_TARGET = process.env.PM2_TARGET || "beanance-market";
 const APP_PORT = Number(process.env.APP_PORT || 3030);
 const LOG_DIR = process.env.DEPLOY_LOG_DIR || "/var/log/beanance-market-deploy";
 
@@ -133,14 +132,14 @@ async function main() {
   process.stderr.write = (chunk, encoding, callback) => append(originalErr, chunk, encoding, callback);
 
   log(`Deployment started in ${projectPath}`);
-  log(`Branch: ${BRANCH}; PM2 target: ${PM2_TARGET}; port: ${APP_PORT}`);
+  log(`Branch: ${BRANCH}; PM2 ecosystem: ecosystem.config.cjs; port: ${APP_PORT}`);
   log(`Deployment log: ${logFile}`);
 
   run("Git pull", "git", ["pull", "--ff-only", "origin", BRANCH]);
   // [ADDED] Synchronize missing environment variables before dependency install and PM2 restart.
   syncEnvFromExample();
   run("Install production dependencies", "npm", ["install", "--omit=dev", "--no-package-lock"]);
-  run("Restart backend with PM2", "pm2", ["restart", PM2_TARGET, "--update-env"]);
+  run("Start or reload backend with PM2", "pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"]);
   await verifyHealth();
 
   log(`DEPLOYMENT SUCCESS in ${((Date.now() - startedAt) / 1000).toFixed(1)} seconds`);
