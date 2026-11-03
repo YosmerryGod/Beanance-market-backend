@@ -183,14 +183,13 @@ app.get("/api/v1/market/tickers", async () => {
 });
 
 app.get("/api/v1/market/top-movers", async (request) => {
-  const limit = parseLimit(request.query.limit);
+  const limit = parseLimit(request.query.limit, 500, 1000);
   const events = getTopMovers(limit);
   const gainers = events.filter((item) => item.positive);
   const losers = events.filter((item) => !item.positive);
   return {
     success: true,
     updatedAt: Date.now(),
-    interval: "1m",
     data: { events, gainers, losers },
     meta: getTopMoversStatus()
   };
@@ -212,7 +211,7 @@ websocketServer.on("connection", (socket) => {
   socket.on("pong", () => { socket.isAlive = true; });
 
   sendJson(socket, { type: "market.snapshot", timestamp: Date.now(), data: getMarkets() });
-  sendJson(socket, { type: "market.top-movers", timestamp: Date.now(), data: { events: getTopMovers(50) } });
+  sendJson(socket, { type: "market.top-movers", timestamp: Date.now(), data: { events: getTopMovers(500) } });
 
   socket.on("message", (raw) => {
     if (!isMessageRateAllowed(socket)) {
