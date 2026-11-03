@@ -28,7 +28,10 @@ export class ManagedWebSocket {
       this.lastActivityAt = Date.now();
       console.info(`${this.name} WebSocket connected`);
       this.startHeartbeat(socket);
-      const openResult = this.onOpen?.(socket);\n      if (openResult && typeof openResult.then === "function") {\n        openResult.catch((error) => console.error(`${this.name} WebSocket open handler failed:`, error.message));\n      }
+      const openResult = this.onOpen?.(socket);
+      if (openResult && typeof openResult.then === "function") {
+        openResult.catch((error) => console.error(`${this.name} WebSocket open handler failed:`, error.message));
+      }
     });
 
     socket.on("message", (raw) => {
