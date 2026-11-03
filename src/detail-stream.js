@@ -84,10 +84,13 @@ function connect(channel) {
     name: `Binance ${channel}`,
     url,
     hasDemand: () => !shuttingDown && [...clientsByStream.keys()].some((name) => streamChannel(name) === channel),
-    onOpen: () => {
+    onOpen: async () => {
       const streams = [...clientsByStream.keys()].filter((name) => streamChannel(name) === channel);
       for (let index = 0; index < streams.length; index += config.websocket.commandBatchSize) {
         sendCommand(channel, "SUBSCRIBE", streams.slice(index, index + config.websocket.commandBatchSize));
+        if (index + config.websocket.commandBatchSize < streams.length) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
       }
     },
     onMessage: handleUpstreamMessage,
@@ -110,6 +113,7 @@ export function subscribeDetailStreams(client, symbolValue, requestedStreams) {
   if (!subscriptionsByClient.has(client)) subscriptionsByClient.set(client, new Set());
   const clientSet = subscriptionsByClient.get(client);
   const accepted = [];
+  const addedByChannel = { market: [], public: [] };
 
   for (const stream of requested) {
     const name = streamName(symbol, stream);
@@ -133,8 +137,11 @@ export function subscribeDetailStreams(client, symbolValue, requestedStreams) {
         idleTimers[channel] = null;
       }
       if (!upstreams[channel]) connect(channel);
-      else sendCommand(channel, "SUBSCRIBE", [name]);
+      else addedByChannel[channel].push(name);
     }
+  }
+  for (const channel of ["market", "public"]) {
+    if (addedByChannel[channel].length) sendCommand(channel, "SUBSCRIBE", addedByChannel[channel]);
   }
   return accepted;
 }
@@ -145,6 +152,7 @@ export function unsubscribeDetailStreams(client, symbolValue, requestedStreams) 
   const symbol = String(symbolValue || "").toUpperCase();
   const streams = Array.isArray(requestedStreams) ? requestedStreams.filter((stream) => allowedStreams.has(stream)) : [...allowedStreams];
   const removed = [];
+  const removedByChannel = { market: [], public: [] };
 
   for (const stream of streams) {
     const name = streamName(symbol, stream);
@@ -155,9 +163,12 @@ export function unsubscribeDetailStreams(client, symbolValue, requestedStreams) 
     if (subscribers?.size === 0) {
       clientsByStream.delete(name);
       const channel = streamChannel(name);
-      sendCommand(channel, "UNSUBSCRIBE", [name]);
+      removedByChannel[channel].push(name);
       scheduleIdleClose(channel);
     }
+  }
+  for (const channel of ["market", "public"]) {
+    if (removedByChannel[channel].length) sendCommand(channel, "UNSUBSCRIBE", removedByChannel[channel]);
   }
   if (clientSet.size === 0) subscriptionsByClient.delete(client);
   return removed;
