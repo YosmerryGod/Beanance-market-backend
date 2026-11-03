@@ -176,23 +176,25 @@ export function unsubscribeDetailStreams(client, symbolValue, requestedStreams) 
   const streams = Array.isArray(requestedStreams)
     ? requestedStreams.filter((stream) => allowedStreams.has(stream))
     : [...allowedStreams];
-  const removed = [];
+  const clientRemoved = [];
+  const upstreamRemoved = [];
 
   for (const stream of streams) {
     const name = streamName(symbol, stream);
     if (!clientSubscriptions.delete(name)) continue;
+    clientRemoved.push(name);
 
     const nextCount = (streamRefCounts.get(name) || 1) - 1;
     if (nextCount <= 0) {
       streamRefCounts.delete(name);
-      removed.push(name);
+      upstreamRemoved.push(name);
     } else {
       streamRefCounts.set(name, nextCount);
     }
   }
 
-  if (removed.length) sendCommand("UNSUBSCRIBE", removed);
-  return removed;
+  if (upstreamRemoved.length) sendCommand("UNSUBSCRIBE", upstreamRemoved);
+  return clientRemoved;
 }
 
 export function removeDetailClient(client) {
