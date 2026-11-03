@@ -108,7 +108,7 @@ async function main() {
   }
 
   fs.mkdirSync(LOG_DIR, { recursive: true });
-  const logFile = path.join(LOG_DIR, `deploy-${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
+  // [ADDED] Keep only the newest deployment logs to prevent unbounded disk usage.\n  const oldLogs = fs.readdirSync(LOG_DIR).filter((name) => name.startsWith("deploy-") && name.endsWith(".log")).sort();\n  for (const name of oldLogs.slice(0, Math.max(0, oldLogs.length - 9))) fs.rmSync(path.join(LOG_DIR, name), { force: true });\n  const logFile = path.join(LOG_DIR, `deploy-${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
   const startedAt = Date.now();
   const originalOut = process.stdout.write.bind(process.stdout);
   const originalErr = process.stderr.write.bind(process.stderr);
