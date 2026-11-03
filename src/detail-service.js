@@ -136,7 +136,7 @@ export async function getMarketMetrics(symbolValue, forceRefresh = false) {
     const stored = getStoredMetrics(symbol);
     if (stored && Date.now() - stored.updatedAt < config.cache.metricsTtlMs) return stored;
   }
-  return cached(`metrics:${symbol}`, config.cache.metricsTtlMs, async () => {
+  if (forceRefresh) detailCache.delete(`metrics:${symbol}`);\n  return cached(`metrics:${symbol}`, config.cache.metricsTtlMs, async () => {
     const [premium, interest] = await Promise.all([
       fetchPremiumIndex(symbol),
       fetchOpenInterest(symbol).catch(() => null)
