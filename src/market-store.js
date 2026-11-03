@@ -1,7 +1,8 @@
 import {
   getStoredMarketSnapshot,
   saveMarkets,
-  saveTickers
+  saveTickers,
+  setPersistedSymbols
 } from "./database.js";
 
 const marketBySymbol = new Map();
@@ -138,6 +139,7 @@ export function applyTickerSnapshot(tickers) {
     if (item) updated.push(item);
   }
   saveTickers(updated);
+  setPersistedSymbols([...updated].sort((a, b) => (b.quoteVolume ?? 0) - (a.quoteVolume ?? 0)).map((item) => item.symbol));
   lastSnapshotAt = Date.now();
   lastSource = "rest";
   return updated;
