@@ -177,15 +177,20 @@ export function unsubscribeDetailStreams(client, symbolValue, requestedStreams) 
 export function removeDetailClient(client) {
   const clientSet = subscriptionsByClient.get(client);
   if (!clientSet) return;
+  const removedByChannel = { market: [], public: [] };
+
   for (const name of clientSet) {
     const subscribers = clientsByStream.get(name);
     subscribers?.delete(client);
     if (subscribers?.size === 0) {
       clientsByStream.delete(name);
       const channel = streamChannel(name);
-      sendCommand(channel, "UNSUBSCRIBE", [name]);
+      removedByChannel[channel].push(name);
       scheduleIdleClose(channel);
     }
+  }
+  for (const channel of ["market", "public"]) {
+    if (removedByChannel[channel].length) sendCommand(channel, "UNSUBSCRIBE", removedByChannel[channel]);
   }
   subscriptionsByClient.delete(client);
 }
