@@ -11,24 +11,39 @@ const allowedStreams = new Set([
 
 const subscriptionsByClient = new Map();
 const streamRefCounts = new Map();
-let upstream = null;
-let reconnectTimer = null;
-let reconnectAttempts = 0;
+const upstreams = {
+  market: null,
+  public: null
+};
+const reconnectTimers = {
+  market: null,
+  public: null
+};
+const reconnectAttempts = {
+  market: 0,
+  public: 0
+};
 let shuttingDown = false;
 let messageId = 1;
 let onDataHandler = () => {};
 
-function upstreamUrl() {
-  const base = config.binanceWsBaseUrl
-    .replace(/\/market\/stream\/?$/, "")
-    .replace(/\/$/, "");
-  return `${base}/ws`;
+function streamChannel(streamNameValue) {
+  return streamNameValue.endsWith("@depth20@100ms") ? "public" : "market";
 }
 
-function sendCommand(method, params) {
-  if (!params.length || upstream?.readyState !== WebSocket.OPEN) return;
+// [MODIFIED] Keep Binance's separate Market Streams and Public Streams endpoints.
+function upstreamUrl(channel) {
+  const base = config.binanceWsBaseUrl
+    .replace(/\/(?:market|public)\/stream\/?$/, "")
+    .replace(/\/$/, "");
+  return `${base}/${channel}/stream`;
+}
 
-  upstream.send(JSON.stringify({
+function sendCommand(channel, method, params) {
+  const socket = upstreams[channel];
+  if (!params.length || socket?.readyState !== WebSocket.OPEN) return;
+
+  socket.send(JSON.stringify({
     method,
     params,
     id: messageId++
@@ -39,33 +54,45 @@ function streamName(symbol, stream) {
   return `${symbol.toLowerCase()}@${stream}`;
 }
 
-function scheduleReconnect() {
-  if (shuttingDown || reconnectTimer) return;
+function scheduleReconnect(channel) {
+  if (shuttingDown || reconnectTimers[channel]) return;
+
   const delay = Math.min(
-    config.reconnectBaseDelayMs * 2 ** reconnectAttempts,
+    config.reconnectBaseDelayMs * 2 ** reconnectAttempts[channel],
     config.reconnectMaxDelayMs
   );
-  reconnectAttempts += 1;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connect();
+  reconnectAttempts[channel] += 1;
+
+  reconnectTimers[channel] = setTimeout(() => {
+    reconnectTimers[channel] = null;
+    connect(channel);
   }, delay);
+
+  console.warn(`Binance ${channel} WebSocket reconnect scheduled in ${delay}ms`);
 }
 
-function connect() {
-  if (shuttingDown || upstream) return;
+function connect(channel) {
+  if (shuttingDown || upstreams[channel]) return;
 
-  upstream = new WebSocket(upstreamUrl(), { handshakeTimeout: 15000 });
+  const socket = new WebSocket(upstreamUrl(channel), {
+    handshakeTimeout: 15000
+  });
+  upstreams[channel] = socket;
 
-  upstream.on("open", () => {
-    reconnectAttempts = 0;
-    const streams = [...streamRefCounts.keys()];
+  socket.on("open", () => {
+    reconnectAttempts[channel] = 0;
+    console.info(`Binance ${channel} WebSocket connected: ${upstreamUrl(channel)}`);
+
+    const streams = [...streamRefCounts.keys()].filter(
+      (name) => streamChannel(name) === channel
+    );
+
     for (let index = 0; index < streams.length; index += 100) {
-      sendCommand("SUBSCRIBE", streams.slice(index, index + 100));
+      sendCommand(channel, "SUBSCRIBE", streams.slice(index, index + 100));
     }
   });
 
-  upstream.on("message", (raw) => {
+  socket.on("message", (raw) => {
     let message;
     try {
       message = JSON.parse(raw.toString());
@@ -120,13 +147,18 @@ function connect() {
     });
   });
 
-  upstream.on("error", (error) => {
-    console.error("Binance detail WebSocket error:", error.message);
+  socket.on("error", (error) => {
+    console.error(`Binance ${channel} WebSocket error:`, error.message);
   });
 
-  upstream.on("close", () => {
-    upstream = null;
-    scheduleReconnect();
+  socket.on("close", (code, reason) => {
+    if (upstreams[channel] === socket) upstreams[channel] = null;
+    console.warn(
+      `Binance ${channel} WebSocket closed:`,
+      code,
+      reason?.toString() || ""
+    );
+    scheduleReconnect(channel);
   });
 }
 
@@ -148,7 +180,10 @@ export function subscribeDetailStreams(client, symbolValue, requestedStreams) {
   }
 
   const clientSubscriptions = subscriptionsByClient.get(client);
-  const added = [];
+  const addedByChannel = {
+    market: [],
+    public: []
+  };
 
   for (const stream of streams) {
     const name = streamName(symbol, stream);
@@ -157,12 +192,17 @@ export function subscribeDetailStreams(client, symbolValue, requestedStreams) {
     clientSubscriptions.add(name);
     const previousCount = streamRefCounts.get(name) || 0;
     streamRefCounts.set(name, previousCount + 1);
-    if (previousCount === 0) added.push(name);
+
+    if (previousCount === 0) {
+      addedByChannel[streamChannel(name)].push(name);
+    }
   }
 
-  if (added.length) {
-    if (!upstream) connect();
-    sendCommand("SUBSCRIBE", added);
+  for (const channel of ["market", "public"]) {
+    const added = addedByChannel[channel];
+    if (!added.length) continue;
+    if (!upstreams[channel]) connect(channel);
+    sendCommand(channel, "SUBSCRIBE", added);
   }
 
   return streams;
@@ -177,7 +217,10 @@ export function unsubscribeDetailStreams(client, symbolValue, requestedStreams) 
     ? requestedStreams.filter((stream) => allowedStreams.has(stream))
     : [...allowedStreams];
   const clientRemoved = [];
-  const upstreamRemoved = [];
+  const removedByChannel = {
+    market: [],
+    public: []
+  };
 
   for (const stream of streams) {
     const name = streamName(symbol, stream);
@@ -187,13 +230,16 @@ export function unsubscribeDetailStreams(client, symbolValue, requestedStreams) 
     const nextCount = (streamRefCounts.get(name) || 1) - 1;
     if (nextCount <= 0) {
       streamRefCounts.delete(name);
-      upstreamRemoved.push(name);
+      removedByChannel[streamChannel(name)].push(name);
     } else {
       streamRefCounts.set(name, nextCount);
     }
   }
 
-  if (upstreamRemoved.length) sendCommand("UNSUBSCRIBE", upstreamRemoved);
+  for (const channel of ["market", "public"]) {
+    sendCommand(channel, "UNSUBSCRIBE", removedByChannel[channel]);
+  }
+
   return clientRemoved;
 }
 
@@ -201,24 +247,35 @@ export function removeDetailClient(client) {
   const clientSubscriptions = subscriptionsByClient.get(client);
   if (!clientSubscriptions) return;
 
-  const removed = [];
+  const removedByChannel = {
+    market: [],
+    public: []
+  };
+
   for (const name of clientSubscriptions) {
     const nextCount = (streamRefCounts.get(name) || 1) - 1;
     if (nextCount <= 0) {
       streamRefCounts.delete(name);
-      removed.push(name);
+      removedByChannel[streamChannel(name)].push(name);
     } else {
       streamRefCounts.set(name, nextCount);
     }
   }
 
   subscriptionsByClient.delete(client);
-  if (removed.length) sendCommand("UNSUBSCRIBE", removed);
+
+  for (const channel of ["market", "public"]) {
+    sendCommand(channel, "UNSUBSCRIBE", removedByChannel[channel]);
+  }
 }
 
 export function getDetailStreamStatus() {
   return {
-    connected: upstream?.readyState === WebSocket.OPEN,
+    connected: Object.values(upstreams).some(
+      (socket) => socket?.readyState === WebSocket.OPEN
+    ),
+    marketConnected: upstreams.market?.readyState === WebSocket.OPEN,
+    publicConnected: upstreams.public?.readyState === WebSocket.OPEN,
     activeStreams: streamRefCounts.size,
     clients: subscriptionsByClient.size
   };
@@ -226,12 +283,21 @@ export function getDetailStreamStatus() {
 
 export function stopDetailStreams() {
   shuttingDown = true;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  if (upstream) {
-    upstream.removeAllListeners();
-    upstream.close();
-    upstream = null;
+
+  for (const channel of ["market", "public"]) {
+    if (reconnectTimers[channel]) {
+      clearTimeout(reconnectTimers[channel]);
+      reconnectTimers[channel] = null;
+    }
+
+    const socket = upstreams[channel];
+    if (socket) {
+      socket.removeAllListeners();
+      socket.close();
+      upstreams[channel] = null;
+    }
   }
+
   subscriptionsByClient.clear();
   streamRefCounts.clear();
 }
