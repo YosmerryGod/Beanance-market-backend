@@ -191,14 +191,35 @@ export const saveTickers = db.transaction((tickers) => {
   }
 });
 
-export const saveKline = (kline) => {
+const pruneKlines = db.prepare(`
+  DELETE FROM klines
+  WHERE symbol = ? AND interval = ?
+    AND open_time NOT IN (
+      SELECT open_time FROM klines
+      WHERE symbol = ? AND interval = ?
+      ORDER BY open_time DESC LIMIT 2000
+    )
+`);
+
+export const saveKline = db.transaction((kline) => {
   upsertKline.run({ ...kline, updatedAt: Date.now() });
-};
+  pruneKlines.run(kline.symbol, kline.interval, kline.symbol, kline.interval);
+});
 
 export const saveKlines = db.transaction((klines) => {
   const now = Date.now();
+  const touchedPairs = new Set();
+
   for (const kline of klines) {
     upsertKline.run({ ...kline, updatedAt: now });
+    touchedPairs.add(`${kline.symbol}:${kline.interval}`);
+  }
+
+  for (const pair of touchedPairs) {
+    const separator = pair.lastIndexOf(":");
+    const symbol = pair.slice(0, separator);
+    const interval = pair.slice(separator + 1);
+    pruneKlines.run(symbol, interval, symbol, interval);
   }
 });
 
@@ -254,7 +275,7 @@ export function getStoredMetrics(symbol) {
 
 export function getDatabaseStatus() {
   return {
-    path: databasePath,
+    path: config.sqlitePath,
     journalMode: db.pragma("journal_mode", { simple: true }),
     klineCount: db.prepare("SELECT COUNT(*) AS count FROM klines").get().count
   };
