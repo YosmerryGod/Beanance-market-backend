@@ -16,7 +16,8 @@ const APP_PORT = Number(process.env.APP_PORT || 3030);
 const LOG_DIR = process.env.DEPLOY_LOG_DIR || "/var/log/beanance-market-deploy";
 
 function log(message) {
-  process.stdout.write(`[${new Date().toISOString()}] ${message}\n`);
+  process.stdout.write(`[${new Date().toISOString()}] ${message}
+`);
 }
 
 function run(name, command, args) {
@@ -54,14 +55,16 @@ function syncEnvFromExample() {
   const currentContent = fs.readFileSync(envPath, "utf8");
   const existingKeys = new Set(
     currentContent
-      .split(/\r?\n/)
+      .split(/\r?
+/)
       .map((line) => line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/))
       .filter(Boolean)
       .map((match) => match[1])
   );
 
   const missingLines = exampleContent
-    .split(/\r?\n/)
+    .split(/\r?
+/)
     .filter((line) => {
       const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
       if (!match || existingKeys.has(match[1])) return false;
@@ -74,8 +77,14 @@ function syncEnvFromExample() {
     return;
   }
 
-  const separator = currentContent.length === 0 || currentContent.endsWith("\n") ? "" : "\n";
-  const addition = `${separator}\n# [ADDED] Missing variables synchronized from .env.example during deployment.\n${missingLines.join("\n")}\n`;
+  const separator = currentContent.length === 0 || currentContent.endsWith("
+") ? "" : "
+";
+  const addition = `${separator}
+# [ADDED] Missing variables synchronized from .env.example during deployment.
+${missingLines.join("
+")}
+`;
   fs.appendFileSync(envPath, addition, "utf8");
   log(`Added ${missingLines.length} missing variable(s) from .env.example to .env. Existing values were preserved.`);
 }
@@ -108,7 +117,10 @@ async function main() {
   }
 
   fs.mkdirSync(LOG_DIR, { recursive: true });
-  // [ADDED] Keep only the newest deployment logs to prevent unbounded disk usage.\n  const oldLogs = fs.readdirSync(LOG_DIR).filter((name) => name.startsWith("deploy-") && name.endsWith(".log")).sort();\n  for (const name of oldLogs.slice(0, Math.max(0, oldLogs.length - 9))) fs.rmSync(path.join(LOG_DIR, name), { force: true });\n  const logFile = path.join(LOG_DIR, `deploy-${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
+  // [ADDED] Keep only the newest deployment logs to prevent unbounded disk usage.
+  const oldLogs = fs.readdirSync(LOG_DIR).filter((name) => name.startsWith("deploy-") && name.endsWith(".log")).sort();
+  for (const name of oldLogs.slice(0, Math.max(0, oldLogs.length - 9))) fs.rmSync(path.join(LOG_DIR, name), { force: true });
+  const logFile = path.join(LOG_DIR, `deploy-${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
   const startedAt = Date.now();
   const originalOut = process.stdout.write.bind(process.stdout);
   const originalErr = process.stderr.write.bind(process.stderr);
@@ -135,6 +147,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`DEPLOYMENT FAILED: ${error.stack || error.message}\n`);
+  process.stderr.write(`DEPLOYMENT FAILED: ${error.stack || error.message}
+`);
   process.exit(1);
 });
