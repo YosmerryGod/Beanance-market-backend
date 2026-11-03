@@ -1,4 +1,6 @@
 import WebSocket from "ws";
+import { closeDatabase } from "./database.js";
+import { stopDetailStreams } from "./detail-stream.js";
 import { config } from "./config.js";
 import {
   createBinanceWebSocketUrl,
@@ -163,7 +165,9 @@ async function shutdown(signal) {
     }
   }
 
+  stopDetailStreams();
   await stopHttpServer();
+  closeDatabase();
   process.exit(0);
 }
 
