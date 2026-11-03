@@ -167,3 +167,15 @@ SQLite stores only closed candles for the highest-volume 100 symbols and configu
 Use ecosystem.config.cjs to run the service with PM2 memory and restart limits. Install pm2-logrotate and configure a 10 MB log size with seven retained files. Deployment log files are also pruned to the latest ten.
 
 See .env.example for all queue, cache, WebSocket, HTTP rate-limit, and SQLite limits.
+### PM2 commands
+
+First-time setup:
+
+    pm2 startOrReload ecosystem.config.cjs --update-env
+    pm2 save
+    pm2 install pm2-logrotate
+    pm2 set pm2-logrotate:max_size 10M
+    pm2 set pm2-logrotate:retain 7
+    pm2 set pm2-logrotate:compress true
+
+Subsequent deployments use node deploy.js. The deployment script pulls the selected branch, adds missing environment variables without replacing existing values, installs production dependencies, applies the PM2 ecosystem configuration, and checks /health.
