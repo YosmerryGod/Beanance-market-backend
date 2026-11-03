@@ -195,7 +195,7 @@ export async function startTopMovers() {
           id: index + 1
         }));
         if (index + 100 < streams.length) {
-          await new Promise((resolve) => setTimeout(resolve, 150));
+          await new Promise((resolve) => setTimeout(resolve, 250));
         }
       }
     },
