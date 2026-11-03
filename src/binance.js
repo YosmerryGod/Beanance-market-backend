@@ -65,3 +65,37 @@ export function createBinanceWebSocketUrl() {
   const baseUrl = config.binanceWsBaseUrl.replace(/\/$/, "");
   return `${baseUrl}?streams=!ticker@arr`;
 }
+
+function withQuery(path, params = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
+export async function fetchKlines(symbol, interval, limit = 500, endTime = null) {
+  return requestBinance(withQuery("/fapi/v1/klines", {
+    symbol,
+    interval,
+    limit,
+    endTime
+  }));
+}
+
+export async function fetchOrderBook(symbol, limit = 20) {
+  return requestBinance(withQuery("/fapi/v1/depth", { symbol, limit }));
+}
+
+export async function fetchRecentTrades(symbol, limit = 50) {
+  return requestBinance(withQuery("/fapi/v1/trades", { symbol, limit }));
+}
+
+export async function fetchPremiumIndex(symbol) {
+  return requestBinance(withQuery("/fapi/v1/premiumIndex", { symbol }));
+}
+
+export async function fetchOpenInterest(symbol) {
+  return requestBinance(withQuery("/fapi/v1/openInterest", { symbol }));
+}
