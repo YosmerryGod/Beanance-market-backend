@@ -44,6 +44,8 @@ let connectedStreams = 0;
 let lastMessageAt = null;
 let lastError = null;
 let started = false;
+// [ADDED] Monotonic revision lets API and WebSocket clients detect live snapshot changes.
+let topMoversRevision = 0;
 
 function classifyMove(changePercent) {
   const magnitude = Math.abs(changePercent);
@@ -137,7 +139,7 @@ function handleKlineMessage(payload, timeframe) {
   if (!market) return;
 
   if (categories.length === 0) {
-    eventsByKey.delete(key);
+    if (eventsByKey.delete(key)) topMoversRevision += 1;
   } else {
     const categoryLabels = TOP_MOVER_CATEGORIES
       .filter((item) => categories.includes(item.id))
@@ -170,6 +172,8 @@ function handleKlineMessage(payload, timeframe) {
       candleCloseTime: Number(candle.T),
       candleClosed: candle.x === true
     });
+    // [ADDED] Every qualifying candle message refreshes the live scanner snapshot.
+    topMoversRevision += 1;
   }
 
   if (candle.x === true) {
@@ -294,6 +298,7 @@ export async function startTopMovers() {
 export function stopTopMovers() {
   for (const manager of sockets.values()) manager.stop();
   sockets.clear();
+  if (eventsByKey.size) topMoversRevision += 1;
   eventsByKey.clear();
   candleHistory.clear();
   for (const timeframe of TIMEFRAMES) {
@@ -328,8 +333,13 @@ export function getTopMoverCategoryGroups(events = getTopMovers(MAX_RESULTS)) {
   }));
 }
 
+export function getTopMoversRevision() {
+  return topMoversRevision;
+}
+
 export function getTopMoversStatus() {
   return {
+    revision: topMoversRevision,
     trackedSymbols,
     timeframes: TIMEFRAMES.map((item) => item.interval),
     connectedStreams,
