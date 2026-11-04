@@ -72,10 +72,14 @@ Supported indicators and parameters:
 | Parabolic SAR | `sarStep`, `sarMax` | `0.02`, `0.2` |
 | Supertrend | `supertrendPeriod`, `supertrendMultiplier` | `10`, `3` |
 | Bollinger Bands | `bollingerPeriod`, `bollingerStdDev` | `20`, `2` |
+| Volume | No extra parameters | Base and quote volume per candle |
+| CVD | No extra parameters | Cumulative taker buy minus taker sell |
+| Taker Long / Short | No extra parameters | Aggressive buy/sell base and quote volume |
+| Funding Rate | No extra parameters | Historical funding events and candle-aligned rate series |
 
 Periods are configurable from 1 to 500. MA/EMA accept up to 10 comma-separated periods, each from 1 to 500. SAR step and maximum, Supertrend multiplier, and Bollinger deviation are validated. Values before the required warm-up period are returned as `null`, so the frontend can safely draw gaps instead of misleading zero values.
 
-The response contains `candles` plus aligned indicator arrays under `indicators`. Array index `i` always belongs to `candles[i]`. Supertrend also returns a direction array (`1` bullish, `-1` bearish). Use lowercase Binance interval values: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, and `1w` are supported by the kline service.
+The response contains `candles` plus aligned indicator arrays under `indicators`. Array index `i` always belongs to `candles[i]`. Supertrend also returns a direction array (`1` bullish, `-1` bearish). Volume and taker flow are returned in both base-asset and quote-asset units. Taker Long is Binance kline taker-buy volume; Taker Short is total candle volume minus taker-buy volume. CVD is the cumulative buy-minus-sell delta over the requested candle window and resets when the requested range changes. Funding Rate includes discrete historical settlement events and a candle-aligned step series; the response also includes the latest `currentFundingRate` and `nextFundingTime`. Historical funding retrieval is paginated up to 12 batches of 1,000 events per request and cached for 60 seconds. Use lowercase Binance interval values: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, and `1w` are supported by the kline service.
 
 ### Kline parameters
 
