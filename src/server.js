@@ -7,7 +7,7 @@ import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
 import { getDatabaseStatus } from "./database.js";
 import { getTopMovers, getTopMoversStatus } from "./top-movers.js";
-import { getMarketDepth, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
+import { getMarketDepth, getMarketFundingRates, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
 import { calculateIndicators, normalizeIndicatorOptions } from "./indicators.js";
 import {
   getDetailStreamStatus,
@@ -176,7 +176,9 @@ app.get("/api/v1/market/futures/:symbol/indicators", async (request, reply) => {
   try {
     const options = normalizeIndicatorOptions(request.query);
     const candles = await getMarketKlines(market.symbol, interval, limit, endTime);
-    const indicators = calculateIndicators(candles, options);
+    const fundingRates = await getMarketFundingRates(market.symbol, candles);
+    const indicators = calculateIndicators(candles, options, fundingRates);
+    const currentMetrics = await getMarketMetrics(market.symbol);
     return {
       success: true,
       symbol: market.symbol,
@@ -184,6 +186,8 @@ app.get("/api/v1/market/futures/:symbol/indicators", async (request, reply) => {
       count: candles.length,
       candleSource: "Binance USDⓈ-M Futures",
       candles,
+      currentFundingRate: currentMetrics.fundingRate,
+      nextFundingTime: currentMetrics.nextFundingTime,
       indicators
     };
   } catch (error) {
