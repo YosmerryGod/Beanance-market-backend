@@ -1,6 +1,7 @@
 import { getMarket, getMarkets } from "./market-store.js";
 import { config } from "./config.js";
 import { ManagedWebSocket } from "./websocket-manager.js";
+import { saveTopMoverHistory } from "./database.js";
 
 const MAX_RESULTS = 1000;
 const MIN_MOVE_PERCENT = 3;
@@ -25,6 +26,7 @@ let lastError = null;
 let started = false;
 
 function classifyMove(changePercent) {
+  const magnitude = Math.abs(changePercent);
   if (magnitude < MIN_MOVE_PERCENT) return null;
   if (magnitude < MEDIUM_MOVE_PERCENT) return "Kecil";
   if (magnitude < HIGH_MOVE_PERCENT) return "Sedang";
@@ -85,6 +87,27 @@ function handleKlineMessage(payload, timeframe) {
     severity,
     eventTime
   });
+
+  // Persist only closed candles so live kline updates do not cause repeated SQLite writes.
+  if (candle.x === true) {
+    saveTopMoverHistory({
+      symbol,
+      baseAsset: market.baseAsset,
+      quoteAsset: market.quoteAsset,
+      timeframe: timeframe.interval,
+      direction,
+      severity,
+      changePercent,
+      lastPrice,
+      quoteVolume: Number(market.quoteVolume || 0),
+      baseVolume: Number(market.baseVolume || 0),
+      highPrice: Number(market.highPrice || 0),
+      lowPrice: Number(market.lowPrice || 0),
+      candleOpenTime: Number(candle.t),
+      candleCloseTime: Number(candle.T),
+      eventTime
+    });
+  }
 }
 
 function createTimeframeSocket(timeframe, symbols) {
