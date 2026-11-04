@@ -28,7 +28,7 @@ jobs:
 
           KEY_FILE="$(mktemp)"
           trap 'rm -f "$KEY_FILE"' EXIT
-          printf '%s\\n' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
 
           if ! ssh-keygen -y -f "$KEY_FILE" >/dev/null 2>&1; then
