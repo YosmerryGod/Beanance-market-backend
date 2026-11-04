@@ -44,10 +44,23 @@ db.exec(`
     open_interest REAL, open_interest_updated_at INTEGER, updated_at INTEGER NOT NULL,
     FOREIGN KEY(symbol) REFERENCES markets(symbol) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS top_movers_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL, base_asset TEXT NOT NULL, quote_asset TEXT NOT NULL,
+    timeframe TEXT NOT NULL, direction TEXT NOT NULL, severity TEXT NOT NULL,
+    change_percent REAL NOT NULL, last_price REAL NOT NULL,
+    quote_volume REAL NOT NULL DEFAULT 0, base_volume REAL NOT NULL DEFAULT 0,
+    high_price REAL NOT NULL DEFAULT 0, low_price REAL NOT NULL DEFAULT 0,
+    candle_open_time INTEGER NOT NULL, candle_close_time INTEGER NOT NULL,
+    event_time INTEGER NOT NULL, created_at INTEGER NOT NULL,
+    UNIQUE(symbol, timeframe, candle_open_time)
+  );
   CREATE INDEX IF NOT EXISTS idx_klines_symbol_interval_time
     ON klines(symbol, interval, open_time DESC);
   CREATE INDEX IF NOT EXISTS idx_klines_updated_at ON klines(updated_at);
   CREATE INDEX IF NOT EXISTS idx_tickers_quote_volume ON tickers(quote_volume DESC);
+  CREATE INDEX IF NOT EXISTS idx_top_movers_history_event_time ON top_movers_history(event_time DESC);
+  CREATE INDEX IF NOT EXISTS idx_top_movers_history_symbol_time ON top_movers_history(symbol, timeframe, event_time DESC);
 `);
 
 const upsertMarket = db.prepare(`
@@ -109,6 +122,23 @@ const selectMarketSnapshot = db.prepare(`
   WHERE m.status='TRADING' ORDER BY m.symbol ASC
 `);
 const selectMetric = db.prepare("SELECT * FROM market_metrics WHERE symbol=?");
+const insertTopMoverHistory = db.prepare(`
+  INSERT INTO top_movers_history (
+    symbol,base_asset,quote_asset,timeframe,direction,severity,change_percent,last_price,
+    quote_volume,base_volume,high_price,low_price,candle_open_time,candle_close_time,event_time,created_at
+  ) VALUES (
+    @symbol,@baseAsset,@quoteAsset,@timeframe,@direction,@severity,@changePercent,@lastPrice,
+    @quoteVolume,@baseVolume,@highPrice,@lowPrice,@candleOpenTime,@candleCloseTime,@eventTime,@createdAt
+  )
+  ON CONFLICT(symbol,timeframe,candle_open_time) DO UPDATE SET
+    base_asset=excluded.base_asset,quote_asset=excluded.quote_asset,direction=excluded.direction,
+    severity=excluded.severity,change_percent=excluded.change_percent,last_price=excluded.last_price,
+    quote_volume=excluded.quote_volume,base_volume=excluded.base_volume,high_price=excluded.high_price,
+    low_price=excluded.low_price,candle_close_time=excluded.candle_close_time,
+    event_time=excluded.event_time,created_at=excluded.created_at
+`);
+const countTopMoverHistory = db.prepare("SELECT COUNT(*) AS count FROM top_movers_history");
+const pruneTopMoverHistory = db.prepare("DELETE FROM top_movers_history WHERE event_time < ?");
 const prunePair = db.prepare(`
   DELETE FROM klines WHERE symbol=? AND interval=? AND open_time NOT IN (
     SELECT open_time FROM klines WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?
@@ -197,6 +227,44 @@ export const saveMarketMetrics = (metrics) => {
   upsertMetric.run({ ...metrics, updatedAt: Date.now() });
 };
 
+export const saveTopMoverHistory = db.transaction((event) => {
+  if (!event || !event.symbol || !event.timeframe || !Number.isFinite(event.candleOpenTime)) return false;
+  insertTopMoverHistory.run({ ...event, createdAt: Date.now() });
+  return true;
+});
+
+export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = null, from = null, to = null } = {}) {
+  const conditions = [];
+  const params = [];
+  if (symbol) {
+    conditions.push("symbol = ?");
+    params.push(symbol);
+  }
+  if (timeframe) {
+    conditions.push("timeframe = ?");
+    params.push(timeframe);
+  }
+  if (from !== null) {
+    conditions.push("event_time >= ?");
+    params.push(from);
+  }
+  if (to !== null) {
+    conditions.push("event_time <= ?");
+    params.push(to);
+  }
+  const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
+  const query = `
+    SELECT symbol,base_asset AS baseAsset,quote_asset AS quoteAsset,timeframe,direction,severity,
+      change_percent AS changePercent,last_price AS lastPrice,quote_volume AS quoteVolume,
+      base_volume AS baseVolume,high_price AS highPrice,low_price AS lowPrice,
+      candle_open_time AS candleOpenTime,candle_close_time AS candleCloseTime,event_time AS eventTime,
+      created_at AS createdAt
+    FROM top_movers_history${where}
+    ORDER BY event_time DESC LIMIT ?
+  `;
+  return db.prepare(query).all(...params, limit);
+}
+
 function mapKline(row) {
   return {
     openTime: row.open_time, open: row.open, high: row.high, low: row.low,
@@ -240,6 +308,7 @@ function fileSize(path) {
 export function runDatabaseMaintenance() {
   const cutoff = Date.now() - config.database.retentionDays * 86400000;
   pruneExpired.run(cutoff);
+  pruneTopMoverHistory.run(cutoff);
   const count = countKlines.get().count;
   if (count > config.database.maxKlineRows) {
     pruneGlobal.run(count - config.database.maxKlineRows);
@@ -279,6 +348,7 @@ export function getDatabaseStatus() {
     path: config.sqlitePath,
     journalMode: db.pragma("journal_mode", { simple: true }),
     klineCount: cachedKlineCount,
+    topMoverHistoryCount: countTopMoverHistory.get().count,
     totalBytes,
     maxBytes: config.database.maxDatabaseMb * 1048576,
     persistedSymbolCount: persistedSymbols.size,
