@@ -114,7 +114,18 @@ export async function getMarketFundingRates(symbolValue, candles) {
 
   const key = `funding:${symbol}:${startTime}:${endTime}`;
   return cached(key, 60000, async () => {
-    const rows = await fetchBinanceFundingRates(symbol, startTime, endTime, 1000);
+    const rows = [];
+    let cursor = startTime;
+
+    for (let page = 0; page < 12 && cursor <= endTime; page += 1) {
+      const batch = await fetchBinanceFundingRates(symbol, cursor, endTime, 1000);
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      rows.push(...batch);
+      const lastFundingTime = Number(batch[batch.length - 1].fundingTime);
+      if (!Number.isFinite(lastFundingTime) || batch.length < 1000 || lastFundingTime >= endTime) break;
+      cursor = lastFundingTime + 1;
+    }
+
     return rows.map((item) => ({
       symbol: item.symbol,
       fundingTime: Number(item.fundingTime),
