@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
 import { getDatabaseStatus, getTopMoverHistory } from "./database.js";
-import { getTopMovers, getTopMoversStatus, getTopMoverCategoryGroups, TOP_MOVER_CATEGORIES } from "./top-movers.js";
+import { getTopMovers, getTopMoversStatus, getTopMoverCategoryGroups, getTopMoversRevision, TOP_MOVER_CATEGORIES } from "./top-movers.js";
 import { getMarketDepth, getMarketFundingRates, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
 import { calculateIndicators, normalizeIndicatorOptions } from "./indicators.js";
 import {
@@ -40,6 +40,8 @@ const messageWindows = new WeakMap();
 let marketFlushTimer = null;
 let heartbeatTimer = null;
 let topMoversTimer = null;
+// [ADDED] Broadcast only when the live scanner snapshot has changed.
+let lastBroadcastTopMoversRevision = 0;
 
 function sendJson(socket, payload) {
   if (socket.readyState !== WebSocket.OPEN) return false;
@@ -258,6 +260,7 @@ app.get("/api/v1/market/top-movers", async (request, reply) => {
   return {
     success: true,
     updatedAt: Date.now(),
+    revision: getTopMoversRevision(),
     filters: { category, timeframe, limit },
     data: {
       events,
@@ -321,7 +324,7 @@ websocketServer.on("connection", (socket) => {
   socket.on("pong", () => { socket.isAlive = true; });
 
   sendJson(socket, { type: "market.snapshot", timestamp: Date.now(), data: getMarkets() });
-  sendJson(socket, { type: "market.top-movers", timestamp: Date.now(), data: { events: getTopMovers(500), categories: getTopMoverCategoryGroups(getTopMovers(1000)) }, meta: getTopMoversStatus() });
+  sendJson(socket, { type: "market.top-movers", timestamp: Date.now(), revision: getTopMoversRevision(), data: { events: getTopMovers(500), categories: getTopMoverCategoryGroups(getTopMovers(1000)) }, meta: getTopMoversStatus() });
 
   socket.on("message", (raw) => {
     if (!isMessageRateAllowed(socket)) {
@@ -413,15 +416,20 @@ export function publishMarketStatus(status) {
 
 export async function startHttpServer() {
   await app.listen({ host: config.host, port: config.port });
+  lastBroadcastTopMoversRevision = getTopMoversRevision();
   topMoversTimer = setInterval(() => {
     if (!websocketServer.clients.size) return;
+    const revision = getTopMoversRevision();
+    if (revision === lastBroadcastTopMoversRevision) return;
+    lastBroadcastTopMoversRevision = revision;
     broadcast({
       type: "market.top-movers",
       timestamp: Date.now(),
+      revision,
       data: { events: getTopMovers(500), categories: getTopMoverCategoryGroups(getTopMovers(1000)) },
       meta: getTopMoversStatus()
     });
-  }, 1000);
+  }, 250);
   topMoversTimer.unref?.();
 
   heartbeatTimer = setInterval(() => {
