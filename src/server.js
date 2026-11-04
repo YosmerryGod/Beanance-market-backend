@@ -271,6 +271,7 @@ app.get("/api/v1/market/top-movers/history", async (request, reply) => {
   const limit = parseLimit(request.query.limit, 100, 1000);
   const symbol = request.query.symbol === undefined ? null : String(request.query.symbol).toUpperCase();
   const timeframe = request.query.timeframe === undefined ? null : String(request.query.timeframe);
+  const category = request.query.category === undefined ? null : String(request.query.category).toLowerCase();
   const from = request.query.from === undefined ? null : Number(request.query.from);
   const to = request.query.to === undefined ? null : Number(request.query.to);
   const allowedTimeframes = new Set(["1m", "5m", "15m", "1h", "4h", "1d", "1w"]);
@@ -280,6 +281,10 @@ app.get("/api/v1/market/top-movers/history", async (request, reply) => {
   }
   if (timeframe !== null && !allowedTimeframes.has(timeframe)) {
     return reply.code(400).send({ success: false, error: "INVALID_TIMEFRAME", message: "Unsupported Top Movers timeframe" });
+  }
+  const allowedCategories = new Set(TOP_MOVER_CATEGORIES.filter((item) => item.id !== "all").map((item) => item.id));
+  if (category !== null && !allowedCategories.has(category)) {
+    return reply.code(400).send({ success: false, error: "INVALID_CATEGORY", message: "Unsupported Top Movers category", allowed: [...allowedCategories] });
   }
   if (from !== null && (!Number.isFinite(from) || from <= 0)) {
     return reply.code(400).send({ success: false, error: "INVALID_FROM", message: "from must be a Unix timestamp in milliseconds" });
@@ -291,11 +296,11 @@ app.get("/api/v1/market/top-movers/history", async (request, reply) => {
     return reply.code(400).send({ success: false, error: "INVALID_TIME_RANGE", message: "from must be less than or equal to to" });
   }
 
-  const data = getTopMoverHistory({ limit, symbol, timeframe, from, to });
+  const data = getTopMoverHistory({ limit, symbol, timeframe, category, from, to });
   return {
     success: true,
     count: data.length,
-    filters: { symbol, timeframe, from, to, limit },
+    filters: { symbol, timeframe, category, from, to, limit },
     data
   };
 });
