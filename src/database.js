@@ -139,6 +139,15 @@ const insertTopMoverHistory = db.prepare(`
 `);
 const countTopMoverHistory = db.prepare("SELECT COUNT(*) AS count FROM top_movers_history");
 const pruneTopMoverHistory = db.prepare("DELETE FROM top_movers_history WHERE event_time < ?");
+const MAX_TOP_MOVER_HISTORY_ROWS = 500;
+const pruneExcessTopMoverHistory = db.prepare(`
+  DELETE FROM top_movers_history
+  WHERE id NOT IN (
+    SELECT id FROM top_movers_history
+    ORDER BY event_time DESC, id DESC
+    LIMIT ?
+  )
+`);
 const prunePair = db.prepare(`
   DELETE FROM klines WHERE symbol=? AND interval=? AND open_time NOT IN (
     SELECT open_time FROM klines WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?
@@ -230,6 +239,7 @@ export const saveMarketMetrics = (metrics) => {
 export const saveTopMoverHistory = db.transaction((event) => {
   if (!event || !event.symbol || !event.timeframe || !Number.isFinite(event.candleOpenTime)) return false;
   insertTopMoverHistory.run({ ...event, createdAt: Date.now() });
+  pruneExcessTopMoverHistory.run(MAX_TOP_MOVER_HISTORY_ROWS);
   return true;
 });
 
