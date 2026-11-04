@@ -255,7 +255,7 @@ export const saveTopMoverHistory = db.transaction((event) => {
   return true;
 });
 
-export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = null, from = null, to = null } = {}) {
+export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = null, category = null, from = null, to = null } = {}) {
   const conditions = [];
   const params = [];
   if (symbol) {
@@ -265,6 +265,10 @@ export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = nul
   if (timeframe) {
     conditions.push("timeframe = ?");
     params.push(timeframe);
+  }
+  if (category) {
+    conditions.push("categories LIKE ?");
+    params.push(`%"${category}"%`);
   }
   if (from !== null) {
     conditions.push("event_time >= ?");
