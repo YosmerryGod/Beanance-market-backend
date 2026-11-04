@@ -1,7 +1,7 @@
 import { getMarket, getMarkets } from "./market-store.js";
 import { config } from "./config.js";
 import { ManagedWebSocket } from "./websocket-manager.js";
-import { saveTopMoverHistory } from "./database.js";
+import { getStoredKlines, saveTopMoverHistory } from "./database.js";
 
 const MAX_RESULTS = 1000;
 const MIN_MOVE_PERCENT = 0.25;
@@ -266,6 +266,24 @@ export async function startTopMovers() {
   if (!symbols.length) {
     started = false;
     throw new Error("No active USDT-M perpetual symbols available for Top Movers");
+  }
+
+  // [ADDED] Restore recent closed candles from SQLite so breakout, trend and volume
+  // comparisons are available immediately after a backend restart.
+  for (const market of markets) {
+    for (const timeframe of TIMEFRAMES) {
+      const stored = getStoredKlines(market.symbol, timeframe.interval, HISTORY_CANDLES);
+      if (!stored.length) continue;
+      candleHistory.set(getHistoryKey(market.symbol, timeframe.interval), stored.map((candle) => ({
+        openTime: Number(candle.openTime),
+        closeTime: Number(candle.closeTime),
+        open: Number(candle.open),
+        close: Number(candle.close),
+        high: Number(candle.high),
+        low: Number(candle.low),
+        quoteVolume: Number(candle.quoteVolume || 0)
+      })));
+    }
   }
 
   for (const timeframe of TIMEFRAMES) createTimeframeSocket(timeframe, symbols);
