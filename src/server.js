@@ -5,7 +5,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { config } from "./config.js";
 import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
-import { getDatabaseStatus } from "./database.js";
+import { getDatabaseStatus, getTopMoverHistory } from "./database.js";
 import { getTopMovers, getTopMoversStatus } from "./top-movers.js";
 import { getMarketDepth, getMarketFundingRates, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
 import { calculateIndicators, normalizeIndicatorOptions } from "./indicators.js";
@@ -239,6 +239,39 @@ app.get("/api/v1/market/top-movers", async (request) => {
     updatedAt: Date.now(),
     data: { events, gainers, losers },
     meta: getTopMoversStatus()
+  };
+});
+
+app.get("/api/v1/market/top-movers/history", async (request, reply) => {
+  const limit = parseLimit(request.query.limit, 100, 1000);
+  const symbol = request.query.symbol === undefined ? null : String(request.query.symbol).toUpperCase();
+  const timeframe = request.query.timeframe === undefined ? null : String(request.query.timeframe);
+  const from = request.query.from === undefined ? null : Number(request.query.from);
+  const to = request.query.to === undefined ? null : Number(request.query.to);
+  const allowedTimeframes = new Set(["1m", "5m", "15m", "1h", "4h", "1d", "1w"]);
+
+  if (symbol !== null && !/^[A-Z0-9]{3,30}$/.test(symbol)) {
+    return reply.code(400).send({ success: false, error: "INVALID_SYMBOL", message: "symbol is invalid" });
+  }
+  if (timeframe !== null && !allowedTimeframes.has(timeframe)) {
+    return reply.code(400).send({ success: false, error: "INVALID_TIMEFRAME", message: "Unsupported Top Movers timeframe" });
+  }
+  if (from !== null && (!Number.isFinite(from) || from <= 0)) {
+    return reply.code(400).send({ success: false, error: "INVALID_FROM", message: "from must be a Unix timestamp in milliseconds" });
+  }
+  if (to !== null && (!Number.isFinite(to) || to <= 0)) {
+    return reply.code(400).send({ success: false, error: "INVALID_TO", message: "to must be a Unix timestamp in milliseconds" });
+  }
+  if (from !== null && to !== null && from > to) {
+    return reply.code(400).send({ success: false, error: "INVALID_TIME_RANGE", message: "from must be less than or equal to to" });
+  }
+
+  const data = getTopMoverHistory({ limit, symbol, timeframe, from, to });
+  return {
+    success: true,
+    count: data.length,
+    filters: { symbol, timeframe, from, to, limit },
+    data
   };
 });
 

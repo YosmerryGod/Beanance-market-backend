@@ -48,6 +48,7 @@ All endpoints return JSON.
 | `GET /api/v1/market/futures/:symbol` | One market and its latest ticker |
 | `GET /api/v1/market/tickers` | Markets sorted by quote volume |
 | `GET /api/v1/market/top-movers?limit=20` | Top gainers and losers |
+| `GET /api/v1/market/top-movers/history?limit=100` | Persisted Top Movers history; supports symbol, timeframe, from and to filters |
 | `GET /api/v1/market/futures/:symbol/klines?interval=1m&limit=500` | Historical OHLCV candles |\n| `GET /api/v1/market/futures/:symbol/indicators?interval=1h&limit=500` | Configurable MA, EMA, SAR, Supertrend and Bollinger series |
 | `GET /api/v1/market/futures/:symbol/depth?limit=20` | Current order book snapshot |
 | `GET /api/v1/market/futures/:symbol/trades?limit=50` | Recent public trades |
@@ -143,6 +144,7 @@ If a client disconnects, its subscriptions are released automatically.
 - Streams are subscribed upstream only while at least one frontend client needs them.
 - Multiple frontend clients share the same upstream stream.
 - The existing all-market ticker stream remains separate and unchanged.
+- Top Movers history is stored in SQLite only when a Binance kline candle closes and its move meets the configured 3% threshold. Live updates continue to use the in-memory map and WebSocket.
 - Order book and trade data are sent only to clients subscribed to that symbol and stream.
 
 ## SQLite storage
@@ -155,8 +157,18 @@ Tables:
 - `tickers`: latest REST ticker snapshot
 - `klines`: historical and closed OHLCV candles
 - `market_metrics`: latest funding, mark/index price and open interest
+- `top_movers_history`: qualifying Top Movers events, unique per symbol/timeframe/candle
 
-Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted, with a rolling retention limit of 2,000 candles per symbol/timeframe; order book snapshots and individual trades remain transient.
+Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted, with a rolling retention limit of 2,000 candles per symbol/timeframe. Top Movers history is written once per qualifying closed candle (not on every realtime tick), with a hard global cap of 500 newest records; older records are deleted automatically after each insert. The existing SQLite retention period (30 days by default) also removes expired history. Order book snapshots and individual trades remain transient.
+
+### Top Movers history API
+
+- `GET /api/v1/market/top-movers/history?limit=100`
+- Optional filters: `symbol=BTCUSDT`, `timeframe=1h`, `from=UNIX_MS`, and `to=UNIX_MS`.
+- `limit` accepts 1–1,000 and defaults to 100.
+- Results are ordered newest first. The API returns closed-candle events only.
+- Storage is capped globally at 500 newest records; older rows are deleted automatically.
+- The unique key `symbol + timeframe + candleOpenTime` prevents duplicate rows if the same candle is processed again.
 
 The database file and its WAL files are ignored by Git.
 
