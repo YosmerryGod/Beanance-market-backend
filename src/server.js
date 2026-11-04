@@ -308,7 +308,7 @@ export async function startHttpServer() {
     broadcast({
       type: "market.top-movers",
       timestamp: Date.now(),
-      data: { events: getTopMovers(50) }
+      data: { events: getTopMovers(500) }
     });
   }, 1000);
   topMoversTimer.unref?.();
