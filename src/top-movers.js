@@ -4,9 +4,11 @@ import { ManagedWebSocket } from "./websocket-manager.js";
 import { saveTopMoverHistory } from "./database.js";
 
 const MAX_RESULTS = 1000;
-const MIN_MOVE_PERCENT = 3;
-const MEDIUM_MOVE_PERCENT = 7;
-const HIGH_MOVE_PERCENT = 11;
+const MIN_MOVE_PERCENT = 0.25;
+const MEDIUM_MOVE_PERCENT = 1.5;
+const HIGH_MOVE_PERCENT = 3;
+const HISTORY_CANDLES = 20;
+const VOLUME_SPIKE_MULTIPLIER = 2;
 const TIMEFRAMES = [
   { interval: "1m", label: "1 mnt" },
   { interval: "5m", label: "5 mnt" },
@@ -17,8 +19,23 @@ const TIMEFRAMES = [
   { interval: "1w", label: "1 minggu" }
 ];
 
+export const TOP_MOVER_CATEGORIES = [
+  { id: "all", label: "Semua" },
+  { id: "kenaikan", label: "Kenaikan" },
+  { id: "penurunan", label: "Penurunan" },
+  { id: "pullback", label: "Pullback" },
+  { id: "rally", label: "Rally" },
+  { id: "high_baru", label: "High Baru" },
+  { id: "low_baru", label: "Low Baru" },
+  { id: "harga_naik_volume_tinggi", label: "Harga Naik dengan Volume Tinggi" },
+  { id: "harga_turun_volume_tinggi", label: "Harga Turun dengan Volume Tinggi" }
+];
+
 const eventsByKey = new Map();
 const sockets = new Map();
+const candleHistory = new Map();
+const messageCounts = new Map(TIMEFRAMES.map(({ interval }) => [interval, 0]));
+const symbolCounts = new Map(TIMEFRAMES.map(({ interval }) => [interval, new Set()]));
 let trackedSymbols = 0;
 let connectedStreams = 0;
 let lastMessageAt = null;
@@ -38,10 +55,59 @@ function buildStreamUrl() {
   return `${origin}/ws`;
 }
 
+function getHistoryKey(symbol, interval) {
+  return `${symbol}:${interval}`;
+}
+
+function getClosedHistory(symbol, interval) {
+  return candleHistory.get(getHistoryKey(symbol, interval)) || [];
+}
+
+function getTrend(history) {
+  if (history.length < 3) return null;
+  const recent = history.slice(-3);
+  const rising = recent.every((item, index) => index === 0 || item.close > recent[index - 1].close);
+  const falling = recent.every((item, index) => index === 0 || item.close < recent[index - 1].close);
+  if (rising) return "up";
+  if (falling) return "down";
+  return null;
+}
+
+function detectCategories({ changePercent, candle, history, volumeAverage }) {
+  const categories = [];
+  const positive = changePercent >= 0;
+  const magnitude = Math.abs(changePercent);
+
+  if (magnitude >= MIN_MOVE_PERCENT) {
+    categories.push(positive ? "kenaikan" : "penurunan");
+  }
+
+  const trend = getTrend(history);
+  if (!positive && trend === "up") categories.push("pullback");
+  if (positive && trend === "up" && magnitude >= MIN_MOVE_PERCENT) categories.push("rally");
+
+  const previousHigh = history.length
+    ? Math.max(...history.slice(-HISTORY_CANDLES).map((item) => item.high))
+    : 0;
+  const previousLow = history.length
+    ? Math.min(...history.slice(-HISTORY_CANDLES).map((item) => item.low))
+    : 0;
+
+  if (previousHigh > 0 && Number(candle.h) > previousHigh) categories.push("high_baru");
+  if (previousLow > 0 && Number(candle.l) < previousLow) categories.push("low_baru");
+
+  const currentQuoteVolume = Number(candle.q || 0);
+  const volumeSpike = volumeAverage > 0 && currentQuoteVolume >= volumeAverage * VOLUME_SPIKE_MULTIPLIER;
+  if (volumeSpike && positive) categories.push("harga_naik_volume_tinggi");
+  if (volumeSpike && !positive) categories.push("harga_turun_volume_tinggi");
+
+  return [...new Set(categories)];
+}
+
 function handleKlineMessage(payload, timeframe) {
   const data = payload?.data ?? payload;
   const candle = data?.k;
-  if (!candle || !candle.s || !candle.o || !candle.c) return;
+  if (!candle || !candle.s || candle.o === undefined || candle.c === undefined) return;
 
   const symbol = String(candle.s).toUpperCase();
   const openPrice = Number(candle.o);
@@ -49,64 +115,93 @@ function handleKlineMessage(payload, timeframe) {
   if (!(openPrice > 0) || !(lastPrice > 0)) return;
 
   const changePercent = ((lastPrice - openPrice) / openPrice) * 100;
-  const magnitude = Math.abs(changePercent);
   const positive = changePercent >= 0;
   const direction = positive ? "Kenaikan" : "Penurunan";
   const severity = classifyMove(changePercent);
-  const key = `${symbol}:${timeframe.interval}`;
+  const key = getHistoryKey(symbol, timeframe.interval);
   const eventTime = Number(data.E || candle.T || Date.now());
+  const history = getClosedHistory(symbol, timeframe.interval);
+  const volumeAverage = history.length
+    ? history.slice(-HISTORY_CANDLES).reduce((sum, item) => sum + item.quoteVolume, 0) / Math.min(history.length, HISTORY_CANDLES)
+    : 0;
+  const categories = detectCategories({ changePercent, candle, history, volumeAverage });
 
   lastMessageAt = eventTime;
-
-  if (!severity) {
-    eventsByKey.delete(key);
-    return;
-  }
+  messageCounts.set(timeframe.interval, (messageCounts.get(timeframe.interval) || 0) + 1);
+  symbolCounts.get(timeframe.interval)?.add(symbol);
 
   const market = getMarket(symbol);
   if (!market) return;
 
-  const status = `[${severity}] ${direction} ${timeframe.label}`;
-  eventsByKey.set(key, {
-    symbol,
-    baseAsset: market.baseAsset,
-    quoteAsset: market.quoteAsset,
-    contractType: market.contractType,
-    lastPrice,
-    priceChangePercent: changePercent,
-    changePercent,
-    quoteVolume: Number(market.quoteVolume || 0),
-    baseVolume: Number(market.baseVolume || 0),
-    highPrice: Number(market.highPrice || 0),
-    lowPrice: Number(market.lowPrice || 0),
-    positive,
-    categories: [direction],
-    category: direction,
-    status,
-    timeframe: timeframe.interval,
-    severity,
-    eventTime
-  });
-
-  // Persist only closed candles so live kline updates do not cause repeated SQLite writes.
-  if (candle.x === true) {
-    saveTopMoverHistory({
+  if (categories.length === 0) {
+    eventsByKey.delete(key);
+  } else {
+    const categoryLabels = TOP_MOVER_CATEGORIES
+      .filter((item) => categories.includes(item.id))
+      .map((item) => item.label);
+    eventsByKey.set(key, {
       symbol,
       baseAsset: market.baseAsset,
       quoteAsset: market.quoteAsset,
-      timeframe: timeframe.interval,
-      direction,
-      severity,
-      changePercent,
+      contractType: market.contractType,
       lastPrice,
+      priceChangePercent: changePercent,
+      changePercent,
       quoteVolume: Number(market.quoteVolume || 0),
       baseVolume: Number(market.baseVolume || 0),
-      highPrice: Number(market.highPrice || 0),
-      lowPrice: Number(market.lowPrice || 0),
+      candleQuoteVolume: Number(candle.q || 0),
+      volumeAverage,
+      volumeSpike: volumeAverage > 0 && Number(candle.q || 0) >= volumeAverage * VOLUME_SPIKE_MULTIPLIER,
+      highPrice: Number(candle.h || market.highPrice || 0),
+      lowPrice: Number(candle.l || market.lowPrice || 0),
+      positive,
+      categories,
+      categoryLabels,
+      category: categoryLabels[0] || null,
+      status: `[${severity || "Terpantau"}] ${categoryLabels.join(", ")} ${timeframe.label}`,
+      timeframe: timeframe.interval,
+      severity: severity || "Kecil",
+      eventTime,
       candleOpenTime: Number(candle.t),
       candleCloseTime: Number(candle.T),
-      eventTime
+      candleClosed: candle.x === true
     });
+  }
+
+  if (candle.x === true) {
+    const closedCandle = {
+      openTime: Number(candle.t),
+      closeTime: Number(candle.T),
+      open: openPrice,
+      close: lastPrice,
+      high: Number(candle.h),
+      low: Number(candle.l),
+      quoteVolume: Number(candle.q || 0)
+    };
+    const nextHistory = [...history.filter((item) => item.openTime !== closedCandle.openTime), closedCandle]
+      .sort((a, b) => a.openTime - b.openTime)
+      .slice(-HISTORY_CANDLES);
+    candleHistory.set(key, nextHistory);
+
+    if (severity) {
+      saveTopMoverHistory({
+        symbol,
+        baseAsset: market.baseAsset,
+        quoteAsset: market.quoteAsset,
+        timeframe: timeframe.interval,
+        direction,
+        severity,
+        changePercent,
+        lastPrice,
+        quoteVolume: Number(market.quoteVolume || 0),
+        baseVolume: Number(market.baseVolume || 0),
+        highPrice: Number(candle.h || 0),
+        lowPrice: Number(candle.l || 0),
+        candleOpenTime: Number(candle.t),
+        candleCloseTime: Number(candle.T),
+        eventTime
+      });
+    }
   }
 }
 
@@ -127,6 +222,9 @@ function createTimeframeSocket(timeframe, symbols) {
     onMessage: (payload) => handleKlineMessage(payload, timeframe),
     onClose: () => {
       connectedStreams = Math.max(0, connectedStreams - 1);
+    },
+    onError: (error) => {
+      lastError = error?.message || String(error);
     }
   });
   sockets.set(timeframe.interval, manager);
@@ -146,27 +244,43 @@ export async function startTopMovers() {
     throw new Error("No active USDT-M perpetual symbols available for Top Movers");
   }
 
-  for (const timeframe of TIMEFRAMES) {
-    createTimeframeSocket(timeframe, symbols);
-  }
-
-  console.info(`Top Movers started for ${trackedSymbols} symbols across ${TIMEFRAMES.length} timeframes`);
+  for (const timeframe of TIMEFRAMES) createTimeframeSocket(timeframe, symbols);
+  console.info(`Top Movers scanner started for ${trackedSymbols} symbols across ${TIMEFRAMES.length} timeframes`);
 }
 
 export function stopTopMovers() {
   for (const manager of sockets.values()) manager.stop();
   sockets.clear();
   eventsByKey.clear();
+  candleHistory.clear();
+  for (const timeframe of TIMEFRAMES) {
+    messageCounts.set(timeframe.interval, 0);
+    symbolCounts.get(timeframe.interval)?.clear();
+  }
   connectedStreams = 0;
   trackedSymbols = 0;
   started = false;
 }
 
-export function getTopMovers(limit = MAX_RESULTS) {
+export function getTopMovers(limit = MAX_RESULTS, { category = "all", timeframe = null } = {}) {
   const safeLimit = Math.min(Math.max(Number(limit) || MAX_RESULTS, 1), MAX_RESULTS);
   return [...eventsByKey.values()]
+    .filter((event) => !timeframe || event.timeframe === timeframe)
+    .filter((event) => category === "all" || event.categories.includes(category))
     .sort((a, b) => b.eventTime - a.eventTime)
     .slice(0, safeLimit);
+}
+
+export function getTopMoverCategoryGroups(events = getTopMovers(MAX_RESULTS)) {
+  return TOP_MOVER_CATEGORIES.map((category) => ({
+    ...category,
+    count: category.id === "all"
+      ? events.length
+      : events.filter((event) => event.categories.includes(category.id)).length,
+    events: category.id === "all"
+      ? events
+      : events.filter((event) => event.categories.includes(category.id))
+  }));
 }
 
 export function getTopMoversStatus() {
@@ -177,6 +291,11 @@ export function getTopMoversStatus() {
     connected: connectedStreams > 0,
     eventCount: eventsByKey.size,
     lastMessageAt,
-    lastError
+    lastError,
+    messagesByTimeframe: Object.fromEntries(messageCounts),
+    activeSymbolsByTimeframe: Object.fromEntries(
+      [...symbolCounts].map(([interval, symbols]) => [interval, symbols.size])
+    ),
+    categories: TOP_MOVER_CATEGORIES
   };
 }
