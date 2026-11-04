@@ -176,9 +176,11 @@ app.get("/api/v1/market/futures/:symbol/indicators", async (request, reply) => {
   try {
     const options = normalizeIndicatorOptions(request.query);
     const candles = await getMarketKlines(market.symbol, interval, limit, endTime);
-    const fundingRates = await getMarketFundingRates(market.symbol, candles);
+    // [ADDED] Chart clients can skip funding history when they only need price overlays.
+    const includeFunding = request.query.includeFunding !== "false";
+    const fundingRates = includeFunding ? await getMarketFundingRates(market.symbol, candles) : [];
     const indicators = calculateIndicators(candles, options, fundingRates);
-    const currentMetrics = await getMarketMetrics(market.symbol);
+    const currentMetrics = includeFunding ? await getMarketMetrics(market.symbol) : null;
     return {
       success: true,
       symbol: market.symbol,
@@ -186,8 +188,8 @@ app.get("/api/v1/market/futures/:symbol/indicators", async (request, reply) => {
       count: candles.length,
       candleSource: "Binance USDⓈ-M Futures",
       candles,
-      currentFundingRate: currentMetrics.fundingRate,
-      nextFundingTime: currentMetrics.nextFundingTime,
+      currentFundingRate: currentMetrics?.fundingRate ?? null,
+      nextFundingTime: currentMetrics?.nextFundingTime ?? null,
       indicators
     };
   } catch (error) {
