@@ -188,11 +188,76 @@ function bollinger(values, period, deviation) {
   return { upper, middle, lower };
 }
 
-export function calculateIndicators(candles, options) {
+function calculateMarketFlow(candles, fundingRates = []) {
+  const volumeBase = [];
+  const volumeQuote = [];
+  const takerLongBase = [];
+  const takerLongQuote = [];
+  const takerShortBase = [];
+  const takerShortQuote = [];
+  const deltaBase = [];
+  const deltaQuote = [];
+  const cvdBase = [];
+  const cvdQuote = [];
+  const fundingRate = [];
+
+  let cumulativeBase = 0;
+  let cumulativeQuote = 0;
+  let fundingIndex = 0;
+  let latestFundingRate = null;
+  const sortedFundingRates = [...fundingRates].sort((a, b) => a.fundingTime - b.fundingTime);
+
+  for (const candle of candles) {
+    const baseVolume = Number(candle.volume) || 0;
+    const quoteVolume = Number(candle.quoteVolume) || 0;
+    const buyBase = Math.min(Math.max(Number(candle.takerBuyBaseVolume) || 0, 0), baseVolume);
+    const buyQuote = Math.min(Math.max(Number(candle.takerBuyQuoteVolume) || 0, 0), quoteVolume);
+    const sellBase = Math.max(0, baseVolume - buyBase);
+    const sellQuote = Math.max(0, quoteVolume - buyQuote);
+    const baseDelta = buyBase - sellBase;
+    const quoteDelta = buyQuote - sellQuote;
+
+    cumulativeBase += baseDelta;
+    cumulativeQuote += quoteDelta;
+
+    volumeBase.push(baseVolume);
+    volumeQuote.push(quoteVolume);
+    takerLongBase.push(buyBase);
+    takerLongQuote.push(buyQuote);
+    takerShortBase.push(sellBase);
+    takerShortQuote.push(sellQuote);
+    deltaBase.push(baseDelta);
+    deltaQuote.push(quoteDelta);
+    cvdBase.push(cumulativeBase);
+    cvdQuote.push(cumulativeQuote);
+
+    while (
+      fundingIndex < sortedFundingRates.length &&
+      sortedFundingRates[fundingIndex].fundingTime <= Number(candle.openTime)
+    ) {
+      latestFundingRate = sortedFundingRates[fundingIndex].fundingRate;
+      fundingIndex += 1;
+    }
+    fundingRate.push(latestFundingRate);
+  }
+
+  return {
+    volume: { base: volumeBase, quote: volumeQuote },
+    takerLong: { base: takerLongBase, quote: takerLongQuote },
+    takerShort: { base: takerShortBase, quote: takerShortQuote },
+    volumeDelta: { base: deltaBase, quote: deltaQuote },
+    cvd: { base: cvdBase, quote: cvdQuote },
+    fundingRate,
+    fundingRateEvents: sortedFundingRates
+  };
+}
+
+export function calculateIndicators(candles, options, fundingRates = []) {
   const closes = candles.map((candle) => Number(candle.close));
   const result = {
     ma: {},
     ema: {},
+    ...calculateMarketFlow(candles, fundingRates),
     sar: parabolicSar(candles, options.sarStep, options.sarMax),
     supertrend: (() => {
       const values = supertrend(candles, options.supertrendPeriod, options.supertrendMultiplier);
