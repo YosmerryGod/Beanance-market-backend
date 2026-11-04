@@ -229,11 +229,12 @@ function createTimeframeSocket(timeframe, symbols) {
     },
     onMessage: (payload) => {
       if (payload?.id === subscriptionId) {
-        if (payload.error) {
+        if (payload.error || payload.code !== undefined) {
+          const subscriptionError = payload.error || { code: payload.code, msg: payload.msg };
           subscriptionAcks.set(timeframe.interval, false);
-          subscriptionErrors.set(timeframe.interval, payload.error);
-          lastError = `${timeframe.interval}: ${payload.error.msg || JSON.stringify(payload.error)}`;
-          console.error(`Top Movers ${timeframe.interval} subscription rejected:`, payload.error);
+          subscriptionErrors.set(timeframe.interval, subscriptionError);
+          lastError = `${timeframe.interval}: ${subscriptionError.msg || JSON.stringify(subscriptionError)}`;
+          console.error(`Top Movers ${timeframe.interval} subscription rejected:`, subscriptionError);
         } else {
           subscriptionAcks.set(timeframe.interval, true);
           subscriptionErrors.delete(timeframe.interval);
