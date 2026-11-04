@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
 import { getDatabaseStatus, getTopMoverHistory } from "./database.js";
-import { getTopMovers, getTopMoversStatus } from "./top-movers.js";
+import { getTopMovers, getTopMoversStatus, getTopMoverCategoryGroups, TOP_MOVER_CATEGORIES } from "./top-movers.js";
 import { getMarketDepth, getMarketFundingRates, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
 import { calculateIndicators, normalizeIndicatorOptions } from "./indicators.js";
 import {
@@ -229,15 +229,40 @@ app.get("/api/v1/market/tickers", async () => {
   return { success: true, count: markets.length, updatedAt: getMarketStatus().lastUpdateAt, data: markets };
 });
 
-app.get("/api/v1/market/top-movers", async (request) => {
+app.get("/api/v1/market/top-movers", async (request, reply) => {
   const limit = parseLimit(request.query.limit, 500, 1000);
-  const events = getTopMovers(limit);
-  const gainers = events.filter((item) => item.positive);
-  const losers = events.filter((item) => !item.positive);
+  const category = String(request.query.category || "all").toLowerCase();
+  const timeframe = request.query.timeframe === undefined ? null : String(request.query.timeframe).toLowerCase();
+  const allowedCategories = new Set(TOP_MOVER_CATEGORIES.map((item) => item.id));
+  const allowedTimeframes = new Set(["1m", "5m", "15m", "1h", "4h", "1d", "1w"]);
+
+  if (!allowedCategories.has(category)) {
+    return reply.code(400).send({
+      success: false,
+      error: "INVALID_CATEGORY",
+      message: "Unsupported Top Movers category",
+      allowed: [...allowedCategories]
+    });
+  }
+  if (timeframe !== null && !allowedTimeframes.has(timeframe)) {
+    return reply.code(400).send({
+      success: false,
+      error: "INVALID_TIMEFRAME",
+      message: "Unsupported Top Movers timeframe",
+      allowed: [...allowedTimeframes]
+    });
+  }
+
+  const events = getTopMovers(limit, { category, timeframe });
+  const allEvents = getTopMovers(1000, { timeframe });
   return {
     success: true,
     updatedAt: Date.now(),
-    data: { events, gainers, losers },
+    filters: { category, timeframe, limit },
+    data: {
+      events,
+      categories: getTopMoverCategoryGroups(allEvents)
+    },
     meta: getTopMoversStatus()
   };
 });
@@ -291,7 +316,7 @@ websocketServer.on("connection", (socket) => {
   socket.on("pong", () => { socket.isAlive = true; });
 
   sendJson(socket, { type: "market.snapshot", timestamp: Date.now(), data: getMarkets() });
-  sendJson(socket, { type: "market.top-movers", timestamp: Date.now(), data: { events: getTopMovers(500) } });
+  sendJson(socket, { type: "market.top-movers", timestamp: Date.now(), data: { events: getTopMovers(500), categories: getTopMoverCategoryGroups(getTopMovers(1000)) }, meta: getTopMoversStatus() });
 
   socket.on("message", (raw) => {
     if (!isMessageRateAllowed(socket)) {
@@ -388,7 +413,8 @@ export async function startHttpServer() {
     broadcast({
       type: "market.top-movers",
       timestamp: Date.now(),
-      data: { events: getTopMovers(500) }
+      data: { events: getTopMovers(500), categories: getTopMoverCategoryGroups(getTopMovers(1000)) },
+      meta: getTopMoversStatus()
     });
   }, 1000);
   topMoversTimer.unref?.();
