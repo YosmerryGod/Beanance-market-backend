@@ -58,7 +58,7 @@ async function bootstrap() {
   }
 
   marketSocket.connect();
-  startTopMovers().catch((error) => console.error("Top Movers 1m stream failed to start:", error.message));
+  startTopMovers().catch((error) => console.error("Multi-timeframe Top Movers streams failed to start:", error.message));
   refreshTimer = setInterval(() => {
     refreshMarketData().catch((error) => console.error("Scheduled market refresh failed:", error.message));
   }, config.marketRefreshIntervalMs);
