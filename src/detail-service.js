@@ -1,5 +1,6 @@
 import {
   fetchKlines as fetchBinanceKlines,
+  fetchFundingRates as fetchBinanceFundingRates,
   fetchOpenInterest,
   fetchOrderBook,
   fetchPremiumIndex,
@@ -100,6 +101,26 @@ export async function getMarketKlines(symbolValue, intervalValue, limitValue = 5
     const closed = normalized.filter((candle) => candle.isClosed);
     if (closed.length) saveKlines(closed);
     return normalized.map(({ symbol: _symbol, interval: _interval, ...candle }) => candle);
+  });
+}
+
+export async function getMarketFundingRates(symbolValue, candles) {
+  const symbol = normalizeSymbol(symbolValue);
+  if (!Array.isArray(candles) || candles.length === 0) return [];
+
+  const startTime = Math.max(0, Number(candles[0].openTime) - 8 * 60 * 60 * 1000);
+  const endTime = Number(candles[candles.length - 1].closeTime);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return [];
+
+  const key = `funding:${symbol}:${startTime}:${endTime}`;
+  return cached(key, 60000, async () => {
+    const rows = await fetchBinanceFundingRates(symbol, startTime, endTime, 1000);
+    return rows.map((item) => ({
+      symbol: item.symbol,
+      fundingTime: Number(item.fundingTime),
+      fundingRate: Number(item.fundingRate),
+      markPrice: item.markPrice === undefined ? null : Number(item.markPrice)
+    })).filter((item) => Number.isFinite(item.fundingTime) && Number.isFinite(item.fundingRate));
   });
 }
 
