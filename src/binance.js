@@ -226,6 +226,16 @@ export async function fetchKlines(symbol, interval, limit = 500, endTime = null)
   return requestBinance(path, { ttlMs: 15000, weight: 2 });
 }
 
+export async function fetchFundingRates(symbol, startTime, endTime, limit = 1000) {
+  const path = withQuery("/fapi/v1/fundingRate", {
+    symbol,
+    startTime,
+    endTime,
+    limit: Math.min(Math.max(Number.parseInt(limit, 10) || 1000, 1), 1000)
+  });
+  return requestBinance(path, { ttlMs: 60000, weight: 5 });
+}
+
 export async function fetchOrderBook(symbol, limit = 20) {
   const path = withQuery("/fapi/v1/depth", { symbol, limit });
   return requestBinance(path, { ttlMs: 500, weight: estimateWeight(path) });
