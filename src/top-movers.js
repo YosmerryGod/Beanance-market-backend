@@ -57,7 +57,8 @@ function classifyMove(changePercent) {
 
 function buildStreamUrl() {
   const origin = new URL(config.binanceWsBaseUrl).origin;
-  return `${origin}/ws`;
+  // [MODIFIED] USDⓈ-M Futures Kline streams now use the Market WebSocket endpoint.
+  return `${origin}/market/ws`;
 }
 
 function getHistoryKey(symbol, interval) {
