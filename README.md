@@ -47,7 +47,7 @@ All endpoints return JSON.
 | `GET /api/v1/market/futures` | Active USDT-M perpetual markets |
 | `GET /api/v1/market/futures/:symbol` | One market and its latest ticker |
 | `GET /api/v1/market/tickers` | Markets sorted by quote volume |
-| `GET /api/v1/market/top-movers?limit=20` | Top gainers and losers |
+| `GET /api/v1/market/top-movers?category=all&timeframe=1m&limit=500` | Live market-activity scanner by category and candle timeframe |
 | `GET /api/v1/market/top-movers/history?limit=100` | Persisted Top Movers history; supports symbol, timeframe, from and to filters |
 | `GET /api/v1/market/futures/:symbol/klines?interval=1m&limit=500` | Historical OHLCV candles |\n| `GET /api/v1/market/futures/:symbol/indicators?interval=1h&limit=500` | Configurable MA, EMA, SAR, Supertrend and Bollinger series |
 | `GET /api/v1/market/futures/:symbol/depth?limit=20` | Current order book snapshot |
@@ -144,7 +144,9 @@ If a client disconnects, its subscriptions are released automatically.
 - Streams are subscribed upstream only while at least one frontend client needs them.
 - Multiple frontend clients share the same upstream stream.
 - The existing all-market ticker stream remains separate and unchanged.
-- Top Movers history is stored in SQLite only when a Binance kline candle closes and its move meets the configured 3% threshold. Live updates continue to use the in-memory map and WebSocket.
+- Top Movers scans 1m, 5m, 15m, 1h, 4h, 1d and 1w candles for Kenaikan, Penurunan, Pullback, Rally, High Baru, Low Baru, and directional high-volume events. The displayed percentage is the candle's own timeframe move, not the rolling 24-hour ticker change.
+- Top Movers history is stored in SQLite only when a candle closes and qualifies for at least one scanner category. Each history row includes its category IDs. Live updates continue to use the in-memory map and WebSocket.
+- Top Movers restores its recent closed-candle context from locally persisted klines at startup, and `/health` reports per-timeframe subscription acknowledgements separately from open connections.
 - Order book and trade data are sent only to clients subscribed to that symbol and stream.
 
 ## SQLite storage
@@ -161,10 +163,17 @@ Tables:
 
 Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted, with a rolling retention limit of 2,000 candles per symbol/timeframe. Top Movers history is written once per qualifying closed candle (not on every realtime tick), with a hard global cap of 500 newest records; older records are deleted automatically after each insert. The existing SQLite retention period (30 days by default) also removes expired history. Order book snapshots and individual trades remain transient.
 
+### Top Movers scanner API
+
+- `GET /api/v1/market/top-movers?category=all&timeframe=1m&limit=500`
+- Categories: `all`, `kenaikan`, `penurunan`, `pullback`, `rally`, `high_baru`, `low_baru`, `harga_naik_volume_tinggi`, and `harga_turun_volume_tinggi`.
+- Timeframes: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, and `1w`. Omit `timeframe` to combine all scanner timeframes.
+- Each live event includes `changePercent`, `timeframe`, `categories`, `severity`, candle OHLC bounds, candle quote volume, volume average/ratio, and event timestamps.
+
 ### Top Movers history API
 
 - `GET /api/v1/market/top-movers/history?limit=100`
-- Optional filters: `symbol=BTCUSDT`, `timeframe=1h`, `from=UNIX_MS`, and `to=UNIX_MS`.
+- Optional filters: `symbol=BTCUSDT`, `timeframe=1h`, `category=rally`, `from=UNIX_MS`, and `to=UNIX_MS`.
 - `limit` accepts 1–1,000 and defaults to 100.
 - Results are ordered newest first. The API returns closed-candle events only.
 - Storage is capped globally at 500 newest records; older rows are deleted automatically.

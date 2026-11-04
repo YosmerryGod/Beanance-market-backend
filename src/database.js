@@ -48,6 +48,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT NOT NULL, base_asset TEXT NOT NULL, quote_asset TEXT NOT NULL,
     timeframe TEXT NOT NULL, direction TEXT NOT NULL, severity TEXT NOT NULL,
+    categories TEXT NOT NULL DEFAULT '[]',
     change_percent REAL NOT NULL, last_price REAL NOT NULL,
     quote_volume REAL NOT NULL DEFAULT 0, base_volume REAL NOT NULL DEFAULT 0,
     high_price REAL NOT NULL DEFAULT 0, low_price REAL NOT NULL DEFAULT 0,
@@ -62,6 +63,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_top_movers_history_event_time ON top_movers_history(event_time DESC);
   CREATE INDEX IF NOT EXISTS idx_top_movers_history_symbol_time ON top_movers_history(symbol, timeframe, event_time DESC);
 `);
+
+// [ADDED] Migrate existing databases without dropping previously collected history.
+const topMoverHistoryColumns = db.pragma("table_info(top_movers_history)");
+if (!topMoverHistoryColumns.some((column) => column.name === "categories")) {
+  db.exec("ALTER TABLE top_movers_history ADD COLUMN categories TEXT NOT NULL DEFAULT '[]'");
+}
 
 const upsertMarket = db.prepare(`
   INSERT INTO markets (symbol,pair,base_asset,quote_asset,margin_asset,contract_type,status,price_precision,quantity_precision,onboard_date,delivery_date,updated_at)
@@ -124,15 +131,16 @@ const selectMarketSnapshot = db.prepare(`
 const selectMetric = db.prepare("SELECT * FROM market_metrics WHERE symbol=?");
 const insertTopMoverHistory = db.prepare(`
   INSERT INTO top_movers_history (
-    symbol,base_asset,quote_asset,timeframe,direction,severity,change_percent,last_price,
+    symbol,base_asset,quote_asset,timeframe,direction,severity,categories,change_percent,last_price,
     quote_volume,base_volume,high_price,low_price,candle_open_time,candle_close_time,event_time,created_at
   ) VALUES (
-    @symbol,@baseAsset,@quoteAsset,@timeframe,@direction,@severity,@changePercent,@lastPrice,
+    @symbol,@baseAsset,@quoteAsset,@timeframe,@direction,@severity,@categories,@changePercent,@lastPrice,
     @quoteVolume,@baseVolume,@highPrice,@lowPrice,@candleOpenTime,@candleCloseTime,@eventTime,@createdAt
   )
   ON CONFLICT(symbol,timeframe,candle_open_time) DO UPDATE SET
     base_asset=excluded.base_asset,quote_asset=excluded.quote_asset,direction=excluded.direction,
-    severity=excluded.severity,change_percent=excluded.change_percent,last_price=excluded.last_price,
+    severity=excluded.severity,categories=excluded.categories,
+    change_percent=excluded.change_percent,last_price=excluded.last_price,
     quote_volume=excluded.quote_volume,base_volume=excluded.base_volume,high_price=excluded.high_price,
     low_price=excluded.low_price,candle_close_time=excluded.candle_close_time,
     event_time=excluded.event_time,created_at=excluded.created_at
@@ -238,12 +246,16 @@ export const saveMarketMetrics = (metrics) => {
 
 export const saveTopMoverHistory = db.transaction((event) => {
   if (!event || !event.symbol || !event.timeframe || !Number.isFinite(event.candleOpenTime)) return false;
-  insertTopMoverHistory.run({ ...event, createdAt: Date.now() });
+  insertTopMoverHistory.run({
+    ...event,
+    categories: JSON.stringify(Array.isArray(event.categories) ? event.categories : []),
+    createdAt: Date.now()
+  });
   pruneExcessTopMoverHistory.run(MAX_TOP_MOVER_HISTORY_ROWS);
   return true;
 });
 
-export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = null, from = null, to = null } = {}) {
+export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = null, category = null, from = null, to = null } = {}) {
   const conditions = [];
   const params = [];
   if (symbol) {
@@ -253,6 +265,10 @@ export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = nul
   if (timeframe) {
     conditions.push("timeframe = ?");
     params.push(timeframe);
+  }
+  if (category) {
+    conditions.push("categories LIKE ?");
+    params.push(`%"${category}"%`);
   }
   if (from !== null) {
     conditions.push("event_time >= ?");
@@ -265,14 +281,22 @@ export function getTopMoverHistory({ limit = 100, symbol = null, timeframe = nul
   const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
   const query = `
     SELECT symbol,base_asset AS baseAsset,quote_asset AS quoteAsset,timeframe,direction,severity,
-      change_percent AS changePercent,last_price AS lastPrice,quote_volume AS quoteVolume,
+      change_percent AS changePercent,categories,last_price AS lastPrice,quote_volume AS quoteVolume,
       base_volume AS baseVolume,high_price AS highPrice,low_price AS lowPrice,
       candle_open_time AS candleOpenTime,candle_close_time AS candleCloseTime,event_time AS eventTime,
       created_at AS createdAt
     FROM top_movers_history${where}
     ORDER BY event_time DESC LIMIT ?
   `;
-  return db.prepare(query).all(...params, limit);
+  return db.prepare(query).all(...params, limit).map((row) => {
+    let categories = [];
+    try {
+      categories = JSON.parse(row.categories || "[]");
+    } catch {
+      categories = [];
+    }
+    return { ...row, categories: Array.isArray(categories) ? categories : [] };
+  });
 }
 
 function mapKline(row) {

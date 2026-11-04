@@ -2,12 +2,13 @@ import WebSocket from "ws";
 import { config } from "./config.js";
 
 export class ManagedWebSocket {
-  constructor({ name, url, onMessage, onOpen, onClose, hasDemand = () => true }) {
+  constructor({ name, url, onMessage, onOpen, onClose, onError, hasDemand = () => true }) {
     this.name = name;
     this.url = url;
     this.onMessage = onMessage;
     this.onOpen = onOpen;
     this.onClose = onClose;
+    this.onError = onError;
     this.hasDemand = hasDemand;
     this.socket = null;
     this.reconnectTimer = null;
@@ -49,6 +50,7 @@ export class ManagedWebSocket {
 
     socket.on("error", (error) => {
       console.error(`${this.name} WebSocket error:`, error.message);
+      this.onError?.(error);
     });
 
     socket.on("close", (code, reason) => {
