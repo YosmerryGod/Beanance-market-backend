@@ -8,6 +8,7 @@ import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
 import { getDatabaseStatus } from "./database.js";
 import { getTopMovers, getTopMoversStatus } from "./top-movers.js";
 import { getMarketDepth, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
+import { calculateIndicators, normalizeIndicatorOptions } from "./indicators.js";
 import {
   getDetailStreamStatus,
   removeDetailClient,
@@ -155,6 +156,46 @@ app.get("/api/v1/market/futures/:symbol/klines", async (request, reply) => {
   }
   const data = await getMarketKlines(market.symbol, interval, limit, endTime);
   return { success: true, symbol: market.symbol, interval, count: data.length, data };
+});
+
+app.get("/api/v1/market/futures/:symbol/indicators", async (request, reply) => {
+  const market = requireMarket(request.params.symbol, reply);
+  if (!market) return reply;
+
+  const interval = String(request.query.interval || "1m").toLowerCase();
+  const limit = parseLimit(request.query.limit, 500, 1500);
+  const endTime = request.query.endTime === undefined ? null : Number(request.query.endTime);
+  if (endTime !== null && (!Number.isFinite(endTime) || endTime <= 0)) {
+    return reply.code(400).send({
+      success: false,
+      error: "INVALID_END_TIME",
+      message: "endTime must be a valid Unix timestamp in milliseconds"
+    });
+  }
+
+  try {
+    const options = normalizeIndicatorOptions(request.query);
+    const candles = await getMarketKlines(market.symbol, interval, limit, endTime);
+    const indicators = calculateIndicators(candles, options);
+    return {
+      success: true,
+      symbol: market.symbol,
+      interval,
+      count: candles.length,
+      candleSource: "Binance USDⓈ-M Futures",
+      candles,
+      indicators
+    };
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return reply.code(400).send({
+        success: false,
+        error: "INVALID_INDICATOR_PARAMETERS",
+        message: error.message
+      });
+    }
+    throw error;
+  }
 });
 
 app.get("/api/v1/market/futures/:symbol/depth", async (request, reply) => {
