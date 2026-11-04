@@ -1,98 +1,160 @@
 import { getMarkets } from "./market-store.js";
+import { config } from "./config.js";
+import { ManagedWebSocket } from "./websocket-manager.js";
 
 const MAX_RESULTS = 1000;
-const HIGH_LOW_DISTANCE_PERCENT = 0.15;
-const HIGH_VOLUME_RATIO = 1.5;
+const MIN_MOVE_PERCENT = 3;
+const MEDIUM_MOVE_PERCENT = 7;
+const HIGH_MOVE_PERCENT = 11;
+const TIMEFRAMES = [
+  { interval: "1m", label: "1 mnt" },
+  { interval: "5m", label: "5 mnt" },
+  { interval: "15m", label: "15 mnt" },
+  { interval: "1h", label: "1 jam" },
+  { interval: "4h", label: "4 jam" },
+  { interval: "1d", label: "1 hari" },
+  { interval: "1w", label: "1 minggu" }
+];
 
-function median(values) {
-  const sorted = values.filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
-  if (!sorted.length) return 0;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+const eventsByKey = new Map();
+const sockets = new Map();
+let trackedSymbols = 0;
+let connectedStreams = 0;
+let lastMessageAt = null;
+let lastError = null;
+let started = false;
+
+function classifyMove(changePercent) {
+  const magnitude = Math.abs(changePercent);
+  if (magnitude < MIN_MOVE_PERCENT) return null;
+  if (magnitude < MEDIUM_MOVE_PERCENT) return "Kecil";
+  if (magnitude < HIGH_MOVE_PERCENT) return "Sedang";
+  return "Tinggi";
 }
 
-// [MODIFIED] Build the complete Binance-style Top Movers list from all active 24h Futures tickers.
+function buildStreamUrl() {
+  const origin = new URL(config.binanceWsBaseUrl).origin;
+  return `${origin}/ws`;
+}
+
+function handleKlineMessage(payload, timeframe) {
+  const data = payload?.data ?? payload;
+  const candle = data?.k;
+  if (!candle || !candle.s || !candle.o || !candle.c) return;
+
+  const symbol = String(candle.s).toUpperCase();
+  const openPrice = Number(candle.o);
+  const lastPrice = Number(candle.c);
+  if (!(openPrice > 0) || !(lastPrice > 0)) return;
+
+  const changePercent = ((lastPrice - openPrice) / openPrice) * 100;
+  const magnitude = Math.abs(changePercent);
+  const positive = changePercent >= 0;
+  const direction = positive ? "Kenaikan" : "Penurunan";
+  const severity = classifyMove(changePercent);
+  const key = `${symbol}:${timeframe.interval}`;
+  const eventTime = Number(data.E || candle.T || Date.now());
+
+  lastMessageAt = eventTime;
+
+  if (!severity) {
+    eventsByKey.delete(key);
+    return;
+  }
+
+  const market = getMarkets().find((item) => item.symbol === symbol);
+  if (!market) return;
+
+  const status = `[${severity}] ${direction} ${timeframe.label}`;
+  eventsByKey.set(key, {
+    symbol,
+    baseAsset: market.baseAsset,
+    quoteAsset: market.quoteAsset,
+    contractType: market.contractType,
+    lastPrice,
+    priceChangePercent: changePercent,
+    changePercent,
+    quoteVolume: Number(market.quoteVolume || 0),
+    baseVolume: Number(market.baseVolume || 0),
+    highPrice: Number(market.highPrice || 0),
+    lowPrice: Number(market.lowPrice || 0),
+    positive,
+    categories: [direction],
+    category: direction,
+    status,
+    timeframe: timeframe.interval,
+    severity,
+    eventTime
+  });
+}
+
+function createTimeframeSocket(timeframe, symbols) {
+  const streams = symbols.map((symbol) => `${symbol.toLowerCase()}@kline_${timeframe.interval}`);
+  const manager = new ManagedWebSocket({
+    name: `Binance Top Movers ${timeframe.interval}`,
+    url: buildStreamUrl(),
+    onOpen: (socket) => {
+      socket.send(JSON.stringify({
+        method: "SUBSCRIBE",
+        params: streams,
+        id: TIMEFRAMES.findIndex((item) => item.interval === timeframe.interval) + 1
+      }));
+      connectedStreams += 1;
+      console.info(`Top Movers subscribed to ${streams.length} ${timeframe.interval} kline streams`);
+    },
+    onMessage: (payload) => handleKlineMessage(payload, timeframe),
+    onClose: () => {
+      connectedStreams = Math.max(0, connectedStreams - 1);
+    }
+  });
+  sockets.set(timeframe.interval, manager);
+  manager.connect();
+}
+
+export async function startTopMovers() {
+  if (started) return;
+  started = true;
+
+  const markets = getMarkets().filter((market) => market.isTrading);
+  const symbols = markets.map((market) => market.symbol);
+  trackedSymbols = symbols.length;
+
+  if (!symbols.length) {
+    started = false;
+    throw new Error("No active USDT-M perpetual symbols available for Top Movers");
+  }
+
+  for (const timeframe of TIMEFRAMES) {
+    createTimeframeSocket(timeframe, symbols);
+  }
+
+  console.info(`Top Movers started for ${trackedSymbols} symbols across ${TIMEFRAMES.length} timeframes`);
+}
+
+export function stopTopMovers() {
+  for (const manager of sockets.values()) manager.stop();
+  sockets.clear();
+  eventsByKey.clear();
+  connectedStreams = 0;
+  trackedSymbols = 0;
+  started = false;
+}
+
 export function getTopMovers(limit = MAX_RESULTS) {
-  const markets = getMarkets();
-  const typicalQuoteVolume = median(markets.map((market) => Number(market.quoteVolume || 0)));
-
-  const events = markets
-    .filter((market) => market.isTrading && Number(market.lastPrice) > 0)
-    .map((market) => {
-      const lastPrice = Number(market.lastPrice || 0);
-      const highPrice = Number(market.highPrice || 0);
-      const lowPrice = Number(market.lowPrice || 0);
-      const changePercent = Number(market.priceChangePercent || 0);
-      const quoteVolume = Number(market.quoteVolume || 0);
-      const highDistancePercent = highPrice > 0 ? ((highPrice - lastPrice) / highPrice) * 100 : null;
-      const lowDistancePercent = lowPrice > 0 ? ((lastPrice - lowPrice) / lowPrice) * 100 : null;
-      const volumeRatio = typicalQuoteVolume > 0 ? quoteVolume / typicalQuoteVolume : null;
-      const positive = changePercent >= 0;
-      const categories = [];
-
-      if (positive) categories.push("Kenaikan");
-      else categories.push("Penurunan");
-
-      if (highDistancePercent !== null && highDistancePercent <= HIGH_LOW_DISTANCE_PERCENT) {
-        categories.push("High Baru");
-      }
-      if (lowDistancePercent !== null && lowDistancePercent <= HIGH_LOW_DISTANCE_PERCENT) {
-        categories.push("Low Baru");
-      }
-
-      const nearHigh = highDistancePercent !== null && highDistancePercent <= 2;
-      const awayFromHigh = highDistancePercent !== null && highDistancePercent > 1;
-      if (positive && awayFromHigh && !nearHigh) categories.push("Pullback");
-
-      if (positive && changePercent >= 3) categories.push("Rally");
-
-      const highVolume = volumeRatio !== null && volumeRatio >= HIGH_VOLUME_RATIO;
-      if (highVolume && positive) categories.push("Harga Naik dengan Vol. Tinggi");
-      if (highVolume && !positive) categories.push("Harga Turun dengan Vol. Tinggi");
-
-      let status = positive ? "Kenaikan" : "Penurunan";
-      if (categories.includes("High Baru")) status = "High Baru";
-      else if (categories.includes("Low Baru")) status = "Low Baru";
-      else if (categories.includes("Harga Naik dengan Vol. Tinggi")) status = "Harga Naik dengan Vol. Tinggi";
-      else if (categories.includes("Harga Turun dengan Vol. Tinggi")) status = "Harga Turun dengan Vol. Tinggi";
-      else if (categories.includes("Rally")) status = "Rally";
-      else if (categories.includes("Pullback")) status = "Pullback";
-
-      return {
-        symbol: market.symbol,
-        baseAsset: market.baseAsset,
-        quoteAsset: market.quoteAsset,
-        contractType: market.contractType,
-        lastPrice,
-        priceChangePercent: changePercent,
-        changePercent,
-        quoteVolume,
-        baseVolume: Number(market.baseVolume || 0),
-        highPrice,
-        lowPrice,
-        highDistancePercent,
-        lowDistancePercent,
-        volumeRatio,
-        positive,
-        categories,
-        category: positive ? "Kenaikan" : "Penurunan",
-        status,
-        eventTime: Number(market.eventTime || market.closeTime || Date.now())
-      };
-    })
-    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
-
   const safeLimit = Math.min(Math.max(Number(limit) || MAX_RESULTS, 1), MAX_RESULTS);
-  return events.slice(0, safeLimit);
+  return [...eventsByKey.values()]
+    .sort((a, b) => b.eventTime - a.eventTime)
+    .slice(0, safeLimit);
 }
 
-// [MODIFIED] Report ticker coverage rather than the old one-minute candle subscription.
 export function getTopMoversStatus() {
-  const markets = getMarkets();
   return {
-    trackedSymbols: markets.length,
-    connected: markets.length > 0,
-    lastMessageAt: markets.reduce((latest, market) => Math.max(latest, Number(market.eventTime || 0)), 0) || null,
-    lastError: null
+    trackedSymbols,
+    timeframes: TIMEFRAMES.map((item) => item.interval),
+    connectedStreams,
+    connected: connectedStreams > 0,
+    eventCount: eventsByKey.size,
+    lastMessageAt,
+    lastError
   };
 }
