@@ -4,7 +4,8 @@ import { ManagedWebSocket } from "./websocket-manager.js";
 import { getStoredKlines, saveTopMoverHistory } from "./database.js";
 
 const MAX_RESULTS = 1000;
-const MIN_MOVE_PERCENT = 0.25;
+// [MODIFIED] Only price moves of at least 2% qualify for Top Movers.
+const MIN_MOVE_PERCENT = 2;
 const MEDIUM_MOVE_PERCENT = 1.5;
 const HIGH_MOVE_PERCENT = 3;
 const HISTORY_CANDLES = 20;
@@ -83,6 +84,9 @@ function detectCategories({ changePercent, candle, history, volumeAverage }) {
   const categories = [];
   const positive = changePercent >= 0;
   const magnitude = Math.abs(changePercent);
+
+  // [ADDED] Prevent breakout and volume categories from bypassing the 2% minimum.
+  if (magnitude < MIN_MOVE_PERCENT) return categories;
 
   if (magnitude >= MIN_MOVE_PERCENT) {
     categories.push(positive ? "kenaikan" : "penurunan");
