@@ -48,10 +48,34 @@ All endpoints return JSON.
 | `GET /api/v1/market/futures/:symbol` | One market and its latest ticker |
 | `GET /api/v1/market/tickers` | Markets sorted by quote volume |
 | `GET /api/v1/market/top-movers?limit=20` | Top gainers and losers |
-| `GET /api/v1/market/futures/:symbol/klines?interval=1m&limit=500` | Historical OHLCV candles |
+| `GET /api/v1/market/futures/:symbol/klines?interval=1m&limit=500` | Historical OHLCV candles |\n| `GET /api/v1/market/futures/:symbol/indicators?interval=1h&limit=500` | Configurable MA, EMA, SAR, Supertrend and Bollinger series |
 | `GET /api/v1/market/futures/:symbol/depth?limit=20` | Current order book snapshot |
 | `GET /api/v1/market/futures/:symbol/trades?limit=50` | Recent public trades |
 | `GET /api/v1/market/futures/:symbol/metrics` | Mark/index price, funding rate and open interest |
+
+### Technical indicators
+
+The indicator endpoint calculates values from the same Binance USDⓈ-M OHLCV candles used by the chart. It does not open additional Binance streams and does not store indicator values, keeping the calculation lightweight and allowing every chart to choose its own settings.
+
+Example:
+
+```text
+GET /api/v1/market/futures/BTCUSDT/indicators?interval=1h&limit=500&maPeriods=20,50,200&emaPeriods=9,21,55&sarStep=0.02&sarMax=0.2&supertrendPeriod=10&supertrendMultiplier=3&bollingerPeriod=20&bollingerStdDev=2
+```
+
+Supported indicators and parameters:
+
+| Indicator | Parameters | Defaults |
+| --- | --- | --- |
+| MA (SMA) | `maPeriods` (comma-separated, up to 10 periods) | `20,50` |
+| EMA | `emaPeriods` (comma-separated, up to 10 periods) | `9,21` |
+| Parabolic SAR | `sarStep`, `sarMax` | `0.02`, `0.2` |
+| Supertrend | `supertrendPeriod`, `supertrendMultiplier` | `10`, `3` |
+| Bollinger Bands | `bollingerPeriod`, `bollingerStdDev` | `20`, `2` |
+
+Periods are configurable from 1 to 500. MA/EMA accept up to 10 comma-separated periods, each from 1 to 500. SAR step and maximum, Supertrend multiplier, and Bollinger deviation are validated. Values before the required warm-up period are returned as `null`, so the frontend can safely draw gaps instead of misleading zero values.
+
+The response contains `candles` plus aligned indicator arrays under `indicators`. Array index `i` always belongs to `candles[i]`. Supertrend also returns a direction array (`1` bullish, `-1` bearish). Use lowercase Binance interval values: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, and `1w` are supported by the kline service.
 
 ### Kline parameters
 
