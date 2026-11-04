@@ -1,4 +1,4 @@
-import { getMarkets } from "./market-store.js";
+import { getMarket, getMarkets } from "./market-store.js";
 import { config } from "./config.js";
 import { ManagedWebSocket } from "./websocket-manager.js";
 
@@ -25,7 +25,6 @@ let lastError = null;
 let started = false;
 
 function classifyMove(changePercent) {
-  const magnitude = Math.abs(changePercent);
   if (magnitude < MIN_MOVE_PERCENT) return null;
   if (magnitude < MEDIUM_MOVE_PERCENT) return "Kecil";
   if (magnitude < HIGH_MOVE_PERCENT) return "Sedang";
@@ -62,7 +61,7 @@ function handleKlineMessage(payload, timeframe) {
     return;
   }
 
-  const market = getMarkets().find((item) => item.symbol === symbol);
+  const market = getMarket(symbol);
   if (!market) return;
 
   const status = `[${severity}] ${direction} ${timeframe.label}`;
