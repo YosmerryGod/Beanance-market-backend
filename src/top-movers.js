@@ -36,6 +36,9 @@ const sockets = new Map();
 const candleHistory = new Map();
 const messageCounts = new Map(TIMEFRAMES.map(({ interval }) => [interval, 0]));
 const symbolCounts = new Map(TIMEFRAMES.map(({ interval }) => [interval, new Set()]));
+// [ADDED] Track Binance SUBSCRIBE acknowledgements separately from open sockets.
+const subscriptionAcks = new Map(TIMEFRAMES.map(({ interval }) => [interval, false]));
+const subscriptionErrors = new Map();
 let trackedSymbols = 0;
 let connectedStreams = 0;
 let lastMessageAt = null;
@@ -83,7 +86,7 @@ function detectCategories({ changePercent, candle, history, volumeAverage }) {
   }
 
   const trend = getTrend(history);
-  if (!positive && trend === "up") categories.push("pullback");
+  if (!positive && trend === "up" && magnitude >= MIN_MOVE_PERCENT) categories.push("pullback");
   if (positive && trend === "up" && magnitude >= MIN_MOVE_PERCENT) categories.push("rally");
 
   const previousHigh = history.length
@@ -152,6 +155,7 @@ function handleKlineMessage(payload, timeframe) {
       candleQuoteVolume: Number(candle.q || 0),
       volumeAverage,
       volumeSpike: volumeAverage > 0 && Number(candle.q || 0) >= volumeAverage * VOLUME_SPIKE_MULTIPLIER,
+      volumeRatio: volumeAverage > 0 ? Number((Number(candle.q || 0) / volumeAverage).toFixed(2)) : null,
       highPrice: Number(candle.h || market.highPrice || 0),
       lowPrice: Number(candle.l || market.lowPrice || 0),
       positive,
@@ -183,14 +187,15 @@ function handleKlineMessage(payload, timeframe) {
       .slice(-HISTORY_CANDLES);
     candleHistory.set(key, nextHistory);
 
-    if (severity) {
+    if (categories.length > 0) {
       saveTopMoverHistory({
         symbol,
         baseAsset: market.baseAsset,
         quoteAsset: market.quoteAsset,
         timeframe: timeframe.interval,
         direction,
-        severity,
+        severity: severity || "Kecil",
+        categories,
         changePercent,
         lastPrice,
         quoteVolume: Number(market.quoteVolume || 0),
@@ -207,6 +212,7 @@ function handleKlineMessage(payload, timeframe) {
 
 function createTimeframeSocket(timeframe, symbols) {
   const streams = symbols.map((symbol) => `${symbol.toLowerCase()}@kline_${timeframe.interval}`);
+  const subscriptionId = TIMEFRAMES.findIndex((item) => item.interval === timeframe.interval) + 1;
   const manager = new ManagedWebSocket({
     name: `Binance Top Movers ${timeframe.interval}`,
     url: buildStreamUrl(),
@@ -214,14 +220,32 @@ function createTimeframeSocket(timeframe, symbols) {
       socket.send(JSON.stringify({
         method: "SUBSCRIBE",
         params: streams,
-        id: TIMEFRAMES.findIndex((item) => item.interval === timeframe.interval) + 1
+        id: subscriptionId
       }));
       connectedStreams += 1;
-      console.info(`Top Movers subscribed to ${streams.length} ${timeframe.interval} kline streams`);
+      subscriptionAcks.set(timeframe.interval, false);
+      subscriptionErrors.delete(timeframe.interval);
+      console.info(`Top Movers subscription requested for ${streams.length} ${timeframe.interval} kline streams`);
     },
-    onMessage: (payload) => handleKlineMessage(payload, timeframe),
+    onMessage: (payload) => {
+      if (payload?.id === subscriptionId) {
+        if (payload.error) {
+          subscriptionAcks.set(timeframe.interval, false);
+          subscriptionErrors.set(timeframe.interval, payload.error);
+          lastError = `${timeframe.interval}: ${payload.error.msg || JSON.stringify(payload.error)}`;
+          console.error(`Top Movers ${timeframe.interval} subscription rejected:`, payload.error);
+        } else {
+          subscriptionAcks.set(timeframe.interval, true);
+          subscriptionErrors.delete(timeframe.interval);
+          console.info(`Top Movers ${timeframe.interval} subscription acknowledged for ${streams.length} streams`);
+        }
+        return;
+      }
+      handleKlineMessage(payload, timeframe);
+    },
     onClose: () => {
       connectedStreams = Math.max(0, connectedStreams - 1);
+      subscriptionAcks.set(timeframe.interval, false);
     },
     onError: (error) => {
       lastError = error?.message || String(error);
@@ -256,6 +280,8 @@ export function stopTopMovers() {
   for (const timeframe of TIMEFRAMES) {
     messageCounts.set(timeframe.interval, 0);
     symbolCounts.get(timeframe.interval)?.clear();
+    subscriptionAcks.set(timeframe.interval, false);
+    subscriptionErrors.delete(timeframe.interval);
   }
   connectedStreams = 0;
   trackedSymbols = 0;
@@ -289,6 +315,9 @@ export function getTopMoversStatus() {
     timeframes: TIMEFRAMES.map((item) => item.interval),
     connectedStreams,
     connected: connectedStreams > 0,
+    acknowledgedTimeframes: [...subscriptionAcks].filter(([, acknowledged]) => acknowledged).map(([interval]) => interval),
+    subscriptionAcks: Object.fromEntries(subscriptionAcks),
+    subscriptionErrors: Object.fromEntries(subscriptionErrors),
     eventCount: eventsByKey.size,
     lastMessageAt,
     lastError,
