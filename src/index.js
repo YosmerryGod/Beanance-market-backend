@@ -1,4 +1,4 @@
-import { closeDatabase, startDatabaseMaintenance } from "./database.js";
+import { closeDatabase, saveExchangeInfo, startDatabaseMaintenance } from "./database.js";
 import { stopDetailStreams } from "./detail-stream.js";
 import { startTopMovers, stopTopMovers } from "./top-movers.js";
 import { config } from "./config.js";
@@ -23,8 +23,10 @@ async function refreshMarketData() {
   if (refreshInProgress) return;
   refreshInProgress = true;
   try {
-    const symbols = await fetchExchangeInfo();
-    replaceSymbols(symbols);
+    const exchangeInfo = await fetchExchangeInfo();
+    // [ADDED] Persist the complete Binance exchangeInfo response before selecting active USDT-M perpetuals.
+    saveExchangeInfo(exchangeInfo.payload);
+    replaceSymbols(exchangeInfo.symbols);
     const tickers = await fetchAll24hrTickers();
     applyTickerSnapshot(tickers);
     const status = getMarketStatus();
