@@ -180,7 +180,7 @@ export async function getMarketMetrics(symbolValue, forceRefresh = false) {
       symbol, markPrice: Number(premium.markPrice), indexPrice: Number(premium.indexPrice),
       estimatedSettlePrice: Number(premium.estimatedSettlePrice),
       fundingRate: Number(premium.lastFundingRate), nextFundingTime: Number(premium.nextFundingTime),
-      interestRate: Number(premium.interestRate), time: Number(premium.time),
+      interestRate: Number(premium.interestRate), premiumIndexTime: Number(premium.time),
       openInterest: interest ? Number(interest.openInterest) : null,
       openInterestUpdatedAt: interest ? Number(interest.time || Date.now()) : null
     };
@@ -213,7 +213,7 @@ export async function refreshAllMarketMetrics(symbolValues) {
       fundingRate: Number(item.lastFundingRate),
       nextFundingTime: Number(item.nextFundingTime),
       interestRate: Number(item.interestRate),
-      time: Number(item.time)
+      premiumIndexTime: Number(item.time)
     }))
     .filter((item) => (
       Number.isFinite(item.markPrice) &&
