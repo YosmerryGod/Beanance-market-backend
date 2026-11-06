@@ -183,7 +183,9 @@ function requestBinance(path, { ttlMs = 0, weight = estimateWeight(path) } = {})
 export async function fetchExchangeInfo() {
   const payload = await requestBinance("/fapi/v1/exchangeInfo", { ttlMs: 21600000 });
   if (!Array.isArray(payload.symbols)) throw new Error("Unexpected Binance exchangeInfo response");
-  return payload.symbols
+
+  // [MODIFIED] Keep the original Binance payload intact while building the existing USDT-M perpetual market list.
+  const symbols = payload.symbols
     .filter((symbol) => symbol.status === "TRADING" && symbol.contractType === "PERPETUAL" && symbol.quoteAsset === "USDT" && symbol.marginAsset === "USDT")
     .map((symbol) => ({
       symbol: symbol.symbol,
@@ -196,9 +198,12 @@ export async function fetchExchangeInfo() {
       pricePrecision: symbol.pricePrecision,
       quantityPrecision: symbol.quantityPrecision,
       onboardDate: symbol.onboardDate,
-      deliveryDate: symbol.deliveryDate
+      deliveryDate: symbol.deliveryDate,
+      exchangeInfo: symbol
     }))
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
+
+  return { payload, symbols };
 }
 
 export async function fetchAll24hrTickers() {
