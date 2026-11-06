@@ -121,11 +121,18 @@ const upsertKline = db.prepare(`
     taker_buy_quote_volume=excluded.taker_buy_quote_volume,is_closed=1,updated_at=excluded.updated_at
 `);
 const upsertMetric = db.prepare(`
-  INSERT INTO market_metrics (symbol,mark_price,index_price,estimated_settle_price,funding_rate,next_funding_time,open_interest,open_interest_updated_at,updated_at)
-  VALUES (@symbol,@markPrice,@indexPrice,@estimatedSettlePrice,@fundingRate,@nextFundingTime,@openInterest,@openInterestUpdatedAt,@updatedAt)
+  INSERT INTO market_metrics (
+    symbol,mark_price,index_price,estimated_settle_price,funding_rate,next_funding_time,
+    interest_rate,premium_index_time,open_interest,open_interest_updated_at,updated_at
+  )
+  VALUES (
+    @symbol,@markPrice,@indexPrice,@estimatedSettlePrice,@fundingRate,@nextFundingTime,
+    @interestRate,@premiumIndexTime,@openInterest,@openInterestUpdatedAt,@updatedAt
+  )
   ON CONFLICT(symbol) DO UPDATE SET mark_price=excluded.mark_price,index_price=excluded.index_price,
     estimated_settle_price=excluded.estimated_settle_price,funding_rate=excluded.funding_rate,
-    next_funding_time=excluded.next_funding_time,
+    next_funding_time=excluded.next_funding_time,interest_rate=excluded.interest_rate,
+    premium_index_time=excluded.premium_index_time,
     open_interest=COALESCE(excluded.open_interest,market_metrics.open_interest),
     open_interest_updated_at=COALESCE(excluded.open_interest_updated_at,market_metrics.open_interest_updated_at),
     updated_at=excluded.updated_at
