@@ -368,6 +368,17 @@ export function getStoredExchangeInfo() {
   }
 }
 
+// [ADDED] Read one symbol's original Binance exchangeInfo object without bloating ticker snapshots.
+export function getStoredMarketExchangeInfo(symbol) {
+  const row = db.prepare("SELECT exchange_info_json FROM markets WHERE symbol=?").get(String(symbol).toUpperCase());
+  if (!row) return null;
+  try {
+    return JSON.parse(row.exchange_info_json || "{}");
+  } catch {
+    return null;
+  }
+}
+
 export function getStoredMetrics(symbol) {
   const row = selectMetric.get(symbol);
   if (!row) return null;
