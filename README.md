@@ -45,7 +45,7 @@ All endpoints return JSON.
 | --- | --- |
 | `GET /health` | Service, SQLite and stream health |
 | `GET /api/v1/market/exchange-info` | Complete persisted Binance USD-M exchange metadata, including global fields and every exchange symbol |
-| `GET /api/v1/market/futures` | Active USDT-M perpetual markets, including each market's complete original Binance symbol metadata under `exchangeInfo` |
+| `GET /api/v1/market/futures` | Active USDT-M perpetual markets, including Binance `exchangeInfo` and asset logo fields (`logo`, `logoSource`, `coingeckoId`) |
 | `GET /api/v1/market/futures/:symbol` | One market and its latest ticker |
 | `GET /api/v1/market/futures/:symbol/exchange-info` | Complete original Binance metadata for one contract, including all filters and trading rules |
 | `GET /api/v1/market/tickers` | Markets sorted by quote volume |
@@ -158,11 +158,12 @@ SQLite uses WAL mode, normal synchronous mode, foreign keys, a busy timeout and 
 Tables:
 
 - `exchange_info`: latest complete Binance `/fapi/v1/exchangeInfo` response, including timezone/server metadata, rate limits, assets, exchange filters, and the full symbols array
-- `markets`: active USDT-M perpetual contract metadata plus the complete original Binance symbol object in `exchange_info_json`, preserving all current and future fields such as filters, order types, time-in-force options, precision, and contract parameters
+- `markets`: active USDT-M perpetual contract metadata, the complete original Binance symbol object in `exchange_info_json`, and asset logo metadata (`logo_url`, `logo_source`, `coingecko_id`) stored on each market row
 - `tickers`: latest REST ticker snapshot
 - `klines`: historical and closed OHLCV candles
 - `market_metrics`: latest premium-index fields (mark/index price, estimated settle price, last funding rate, interest rate, next funding time and Binance event time) plus open interest
 - The backend refreshes the bulk `/fapi/v1/premiumIndex` response every 10 seconds by default, stores matching active USDT-M perpetual symbols in one SQLite transaction, and preserves open-interest values between its independent updates. Configure with `MARKET_METRICS_REFRESH_INTERVAL_MS`.
+- Asset logos are resolved once at startup and refreshed every 24 hours. CoinGecko is the primary source; Trust Wallet native-asset logos are checked as fallback. Only unique ticker-symbol matches are accepted to reduce incorrect logo assignments. Logo metadata is stored directly in `markets` and included in REST market lists and WebSocket market snapshots.
 - `top_movers_history`: qualifying Top Movers events, unique per symbol/timeframe/candle
 
 Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted, with a rolling retention limit of 2,000 candles per symbol/timeframe. Top Movers history is written once per qualifying closed candle (not on every realtime tick), with a hard global cap of 500 newest records; older records are deleted automatically after each insert. The existing SQLite retention period (30 days by default) also removes expired history. Order book snapshots and individual trades remain transient.
@@ -197,8 +198,13 @@ The database file and its WAL files are ignored by Git.
 | `BINANCE_WS_BASE_URL` | `wss://fstream.binance.com/market/stream` | Binance market stream URL |
 | `BINANCE_RECONNECT_BASE_DELAY_MS` | `1000` | Initial reconnect delay |
 | `BINANCE_RECONNECT_MAX_DELAY_MS` | `30000` | Maximum reconnect delay |
-| `MARKET_REFRESH_INTERVAL_MS` | `300000` | Exchange info and ticker refresh interval |
+| `MARKET_REFRESH_INTERVAL_MS` | `21600000` | Exchange info and ticker refresh interval |
+| `COINGECKO_API_KEY` | — | Optional CoinGecko Demo API key; kept server-side and sent as an API header |
 | `SQLITE_PATH` | `./data/beanance-market.db` | SQLite database file path |
+
+## Asset logo attribution
+
+CoinGecko-sourced logos and data should be attributed in the frontend with a visible `Data provided by CoinGecko` credit linking to [CoinGecko API](https://www.coingecko.com/en/api). Trust Wallet fallback logos follow the Trust Wallet Assets repository structure.
 
 ## Notes
 
