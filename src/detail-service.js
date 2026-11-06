@@ -221,7 +221,7 @@ export async function refreshAllMarketMetrics(symbolValues) {
       Number.isFinite(item.fundingRate) &&
       Number.isFinite(item.interestRate) &&
       Number.isFinite(item.nextFundingTime) &&
-      Number.isFinite(item.time)
+      Number.isFinite(item.premiumIndexTime) // [MODIFIED] Validate the mapped premiumIndexTime field.
     ));
 
   return savePremiumIndexSnapshots(snapshots);
