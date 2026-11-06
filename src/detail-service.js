@@ -27,7 +27,8 @@ const inFlight = new Map();
 
 function normalizeSymbol(value) {
   const symbol = String(value || "").toUpperCase();
-  if (!/^[A-Z0-9]{3,30}$/.test(symbol)) {
+  // [MODIFIED] Accept Unicode letters and numbers in Binance symbols, including CJK symbols.
+  if (!/^[\p{L}\p{N}]{3,30}$/u.test(symbol)) {
     const error = new Error("Invalid market symbol");
     error.statusCode = 400;
     throw error;
@@ -194,7 +195,8 @@ export async function refreshAllMarketMetrics(symbolValues) {
   const allowedSymbols = new Set(
     (Array.isArray(symbolValues) ? symbolValues : [])
       .map((value) => String(value || "").toUpperCase())
-      .filter((value) => /^[A-Z0-9]{3,30}$/.test(value))
+      // [MODIFIED] Keep valid Unicode market symbols in the bulk metrics allowlist.
+      .filter((value) => /^[\p{L}\p{N}]{3,30}$/u.test(value))
   );
   if (!allowedSymbols.size) return { saved: 0, updatedAt: Date.now() };
 
