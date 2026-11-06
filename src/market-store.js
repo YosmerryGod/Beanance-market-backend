@@ -75,8 +75,7 @@ export function hydrateMarketStore() {
       pricePrecision: row.pricePrecision,
       quantityPrecision: row.quantityPrecision,
       onboardDate: row.onboardDate,
-      deliveryDate: row.deliveryDate,
-      exchangeInfo: row.exchangeInfo ?? {}
+      deliveryDate: row.deliveryDate
     };
     const tickerInfo = {
       symbol: row.symbol,
