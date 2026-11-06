@@ -29,6 +29,8 @@ export const config = {
   reconnectBaseDelayMs: numberFromEnv("BINANCE_RECONNECT_BASE_DELAY_MS", 1000),
   reconnectMaxDelayMs: numberFromEnv("BINANCE_RECONNECT_MAX_DELAY_MS", 30000),
   marketRefreshIntervalMs: numberFromEnv("MARKET_REFRESH_INTERVAL_MS", 21600000),
+  // [ADDED] Refresh the complete premium-index snapshot every 10 seconds by default.
+  marketMetricsRefreshIntervalMs: numberFromEnv("MARKET_METRICS_REFRESH_INTERVAL_MS", 10000),
   rest: {
     timeoutMs: numberFromEnv("BINANCE_REST_TIMEOUT_MS", 10000),
     concurrency: numberFromEnv("BINANCE_REST_CONCURRENCY", 2),
