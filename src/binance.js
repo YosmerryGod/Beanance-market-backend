@@ -22,6 +22,9 @@ const endpointWeights = {
 
 function estimateWeight(path) {
   const pathname = path.split("?")[0];
+  if (pathname === "/fapi/v1/premiumIndex" && !new URLSearchParams(path.split("?")[1] || "").has("symbol")) {
+    return 10;
+  }
   if (pathname === "/fapi/v1/depth") {
     const limit = Number(new URLSearchParams(path.split("?")[1] || "").get("limit") || 20);
     return limit <= 50 ? 2 : limit <= 100 ? 5 : 10;
@@ -254,6 +257,11 @@ export async function fetchRecentTrades(symbol, limit = 50) {
 export async function fetchPremiumIndex(symbol) {
   const path = withQuery("/fapi/v1/premiumIndex", { symbol });
   return requestBinance(path, { ttlMs: 10000, weight: 1 });
+}
+
+// [ADDED] Binance returns the latest premium-index snapshot for every futures symbol in one request.
+export async function fetchAllPremiumIndex() {
+  return requestBinance("/fapi/v1/premiumIndex", { ttlMs: 5000, weight: 10 });
 }
 
 export async function fetchOpenInterest(symbol) {
