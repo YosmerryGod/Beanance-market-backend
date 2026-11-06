@@ -132,7 +132,6 @@ const selectMarketSnapshot = db.prepare(`
     m.margin_asset AS marginAsset,m.contract_type AS contractType,m.status,
     m.price_precision AS pricePrecision,m.quantity_precision AS quantityPrecision,
     m.onboard_date AS onboardDate,m.delivery_date AS deliveryDate,
-    m.exchange_info_json AS exchangeInfoJson,
     t.price_change AS priceChange,t.price_change_percent AS priceChangePercent,
     t.weighted_avg_price AS weightedAvgPrice,t.last_price AS lastPrice,
     t.last_quantity AS lastQuantity,t.open_price AS openPrice,t.high_price AS highPrice,
@@ -334,16 +333,7 @@ export function getStoredKlines(symbol, interval, limit = 500, endTime = null) {
 }
 
 export function getStoredMarketSnapshot() {
-  return selectMarketSnapshot.all().map((row) => {
-    const { exchangeInfoJson, ...market } = row;
-    let exchangeInfo = {};
-    try {
-      exchangeInfo = JSON.parse(exchangeInfoJson || "{}");
-    } catch {
-      exchangeInfo = {};
-    }
-    return { ...market, exchangeInfo };
-  });
+  return selectMarketSnapshot.all();
 }
 
 // [ADDED] Preserve the complete Binance USD-M exchangeInfo payload, including global metadata.
