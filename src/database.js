@@ -172,7 +172,7 @@ const selectMarketSnapshot = db.prepare(`
     m.price_precision AS pricePrecision,m.quantity_precision AS quantityPrecision,
     m.onboard_date AS onboardDate,m.delivery_date AS deliveryDate,
     m.logo_url AS logo,m.logo_source AS logoSource,m.coingecko_id AS coingeckoId,
-    m.exchange_info_json AS exchangeInfoJson, // [ADDED] Read Binance subtype metadata when rebuilding the market cache.
+    m.exchange_info_json AS exchangeInfoJson,
     t.price_change AS priceChange,t.price_change_percent AS priceChangePercent,
     t.weighted_avg_price AS weightedAvgPrice,t.last_price AS lastPrice,
     t.last_quantity AS lastQuantity,t.open_price AS openPrice,t.high_price AS highPrice,
