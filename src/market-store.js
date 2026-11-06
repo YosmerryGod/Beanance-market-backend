@@ -75,7 +75,10 @@ export function hydrateMarketStore() {
       pricePrecision: row.pricePrecision,
       quantityPrecision: row.quantityPrecision,
       onboardDate: row.onboardDate,
-      deliveryDate: row.deliveryDate
+      deliveryDate: row.deliveryDate,
+      logo: row.logo,
+      logoSource: row.logoSource,
+      coingeckoId: row.coingeckoId
     };
     const tickerInfo = {
       symbol: row.symbol,
@@ -110,7 +113,13 @@ export function hydrateMarketStore() {
 export function replaceSymbols(symbols) {
   // [MODIFIED] Persist full Binance metadata, but keep the in-memory ticker objects lightweight.
   saveMarkets(symbols);
-  const marketSymbols = symbols.map(({ exchangeInfo, ...symbol }) => symbol);
+  const marketSymbols = symbols.map(({ exchangeInfo, ...symbol }) => ({
+    ...symbol,
+    // [ADDED] Keep previously resolved logo metadata when Binance refreshes market metadata.
+    logo: marketBySymbol.get(symbol.symbol)?.logo ?? null,
+    logoSource: marketBySymbol.get(symbol.symbol)?.logoSource ?? null,
+    coingeckoId: marketBySymbol.get(symbol.symbol)?.coingeckoId ?? null
+  }));
   symbolsBySymbol = new Map(marketSymbols.map((symbol) => [symbol.symbol, symbol]));
   setPersistedSymbols(symbols.map((item) => item.symbol));
 
@@ -170,6 +179,18 @@ export function getMarkets({ sort = "symbol", order = "asc" } = {}) {
   sortedCache.set(key, { value: markets, expiresAt: Date.now() + SORT_CACHE_TTL_MS });
   while (sortedCache.size > 6) sortedCache.delete(sortedCache.keys().next().value);
   return markets.slice();
+}
+
+// [ADDED] Update logo fields in the live market list after metadata lookup completes.
+export function applyMarketLogo(symbol, logoData) {
+  const key = String(symbol).toUpperCase();
+  const current = marketBySymbol.get(key);
+  if (!current) return false;
+  const updated = { ...current, logo: logoData.logo || null, logoSource: logoData.source || null, coingeckoId: logoData.coingeckoId || null };
+  marketBySymbol.set(key, updated);
+  symbolsBySymbol.set(key, { ...symbolsBySymbol.get(key), logo: updated.logo, logoSource: updated.logoSource, coingeckoId: updated.coingeckoId });
+  invalidateSortedCache(true);
+  return true;
 }
 
 export function getMarket(symbol) {
