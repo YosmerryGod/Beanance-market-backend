@@ -5,7 +5,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { config } from "./config.js";
 import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
-import { getDatabaseStatus, getStoredExchangeInfo, getTopMoverHistory } from "./database.js";
+import { getDatabaseStatus, getStoredExchangeInfo, getStoredMarketExchangeInfo, getTopMoverHistory } from "./database.js";
 import { getTopMovers, getTopMoversStatus, getTopMoverCategoryGroups, getTopMoversRevision, TOP_MOVER_CATEGORIES } from "./top-movers.js";
 import { getMarketDepth, getMarketFundingRates, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
 import { calculateIndicators, normalizeIndicatorOptions } from "./indicators.js";
@@ -145,6 +145,21 @@ app.get("/api/v1/market/exchange-info", async (_request, reply) => {
     });
   }
   return { success: true, data };
+});
+
+// [ADDED] Return the original Binance metadata for one contract without adding it to live ticker messages.
+app.get("/api/v1/market/futures/:symbol/exchange-info", async (request, reply) => {
+  const market = requireMarket(request.params.symbol, reply);
+  if (!market) return reply;
+  const data = getStoredMarketExchangeInfo(market.symbol);
+  if (!data) {
+    return reply.code(404).send({
+      success: false,
+      error: "MARKET_EXCHANGE_INFO_NOT_FOUND",
+      message: "Exchange metadata for this market is not stored"
+    });
+  }
+  return { success: true, symbol: market.symbol, data };
 });
 
 app.get("/api/v1/market/futures", async (request) => {
