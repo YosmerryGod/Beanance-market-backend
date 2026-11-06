@@ -21,7 +21,7 @@ db.exec(`
     quote_asset TEXT NOT NULL, margin_asset TEXT NOT NULL, contract_type TEXT NOT NULL,
     status TEXT NOT NULL, price_precision INTEGER, quantity_precision INTEGER,
     onboard_date INTEGER, delivery_date INTEGER,
-    exchange_info_json TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL
+    exchange_info_json TEXT NOT NULL DEFAULT '{}', logo_url TEXT, logo_source TEXT, coingecko_id TEXT, updated_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS exchange_info (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -76,6 +76,12 @@ const marketColumns = db.pragma("table_info(markets)");
 if (!marketColumns.some((column) => column.name === "exchange_info_json")) {
   db.exec("ALTER TABLE markets ADD COLUMN exchange_info_json TEXT NOT NULL DEFAULT '{}'");
 }
+
+// [ADDED] Store asset logos directly on each market row.
+const logoColumns = db.pragma("table_info(markets)");
+if (!logoColumns.some((column) => column.name === "logo_url")) db.exec("ALTER TABLE markets ADD COLUMN logo_url TEXT");
+if (!logoColumns.some((column) => column.name === "logo_source")) db.exec("ALTER TABLE markets ADD COLUMN logo_source TEXT");
+if (!logoColumns.some((column) => column.name === "coingecko_id")) db.exec("ALTER TABLE markets ADD COLUMN coingecko_id TEXT");
 
 // [ADDED] Migrate premium-index fields without discarding existing market metrics.
 const marketMetricColumns = db.pragma("table_info(market_metrics)");
@@ -165,6 +171,7 @@ const selectMarketSnapshot = db.prepare(`
     m.margin_asset AS marginAsset,m.contract_type AS contractType,m.status,
     m.price_precision AS pricePrecision,m.quantity_precision AS quantityPrecision,
     m.onboard_date AS onboardDate,m.delivery_date AS deliveryDate,
+    m.logo_url AS logo,m.logo_source AS logoSource,m.coingecko_id AS coingeckoId,
     t.price_change AS priceChange,t.price_change_percent AS priceChangePercent,
     t.weighted_avg_price AS weightedAvgPrice,t.last_price AS lastPrice,
     t.last_quantity AS lastQuantity,t.open_price AS openPrice,t.high_price AS highPrice,
@@ -288,6 +295,12 @@ export const saveKlines = db.transaction((klines) => {
   }
   return saved;
 });
+
+// [ADDED] Save resolved logo metadata without changing Binance market or ticker fields.
+export const saveMarketLogo = (symbol, { logo, source, coingeckoId = null }) => {
+  db.prepare("UPDATE markets SET logo_url=?, logo_source=?, coingecko_id=? WHERE symbol=?")
+    .run(logo || null, source || null, coingeckoId, String(symbol).toUpperCase());
+};
 
 export const saveMarketMetrics = (metrics) => {
   upsertMetric.run({ ...metrics, updatedAt: Date.now() });
