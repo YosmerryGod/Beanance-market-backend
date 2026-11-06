@@ -172,6 +172,7 @@ const selectMarketSnapshot = db.prepare(`
     m.price_precision AS pricePrecision,m.quantity_precision AS quantityPrecision,
     m.onboard_date AS onboardDate,m.delivery_date AS deliveryDate,
     m.logo_url AS logo,m.logo_source AS logoSource,m.coingecko_id AS coingeckoId,
+    m.exchange_info_json AS exchangeInfoJson, // [ADDED] Read Binance subtype metadata when rebuilding the market cache.
     t.price_change AS priceChange,t.price_change_percent AS priceChangePercent,
     t.weighted_avg_price AS weightedAvgPrice,t.last_price AS lastPrice,
     t.last_quantity AS lastQuantity,t.open_price AS openPrice,t.high_price AS highPrice,
@@ -391,7 +392,17 @@ export function getStoredKlines(symbol, interval, limit = 500, endTime = null) {
 }
 
 export function getStoredMarketSnapshot() {
-  return selectMarketSnapshot.all();
+  return selectMarketSnapshot.all().map((row) => {
+    let underlyingSubType = [];
+    try {
+      const exchangeInfo = JSON.parse(row.exchangeInfoJson || "{}");
+      underlyingSubType = Array.isArray(exchangeInfo.underlyingSubType) ? exchangeInfo.underlyingSubType : [];
+    } catch {
+      underlyingSubType = [];
+    }
+    const { exchangeInfoJson, ...market } = row;
+    return { ...market, underlyingSubType }; // [ADDED] Expose Binance's original asset categories after backend restart.
+  });
 }
 
 // [ADDED] Preserve the complete Binance USD-M exchangeInfo payload, including global metadata.
