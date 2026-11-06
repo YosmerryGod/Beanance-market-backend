@@ -47,6 +47,7 @@ All endpoints return JSON.
 | `GET /api/v1/market/exchange-info` | Complete persisted Binance USD-M exchange metadata, including global fields and every exchange symbol |
 | `GET /api/v1/market/futures` | Active USDT-M perpetual markets, including each market's complete original Binance symbol metadata under `exchangeInfo` |
 | `GET /api/v1/market/futures/:symbol` | One market and its latest ticker |
+| `GET /api/v1/market/futures/:symbol/exchange-info` | Complete original Binance metadata for one contract, including all filters and trading rules |
 | `GET /api/v1/market/tickers` | Markets sorted by quote volume |
 | `GET /api/v1/market/top-movers?category=all&timeframe=1m&limit=500` | Live market-activity scanner by category and candle timeframe |
 | `GET /api/v1/market/top-movers/history?limit=100` | Persisted Top Movers history; supports symbol, timeframe, from and to filters |
