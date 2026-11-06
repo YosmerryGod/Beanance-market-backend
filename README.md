@@ -44,7 +44,8 @@ All endpoints return JSON.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health` | Service, SQLite and stream health |
-| `GET /api/v1/market/futures` | Active USDT-M perpetual markets |
+| `GET /api/v1/market/exchange-info` | Complete persisted Binance USD-M exchange metadata, including global fields and every exchange symbol |
+| `GET /api/v1/market/futures` | Active USDT-M perpetual markets, including each market's complete original Binance symbol metadata under `exchangeInfo` |
 | `GET /api/v1/market/futures/:symbol` | One market and its latest ticker |
 | `GET /api/v1/market/tickers` | Markets sorted by quote volume |
 | `GET /api/v1/market/top-movers?category=all&timeframe=1m&limit=500` | Live market-activity scanner by category and candle timeframe |
@@ -155,7 +156,8 @@ SQLite uses WAL mode, normal synchronous mode, foreign keys, a busy timeout and 
 
 Tables:
 
-- `markets`: active contract metadata
+- `exchange_info`: latest complete Binance `/fapi/v1/exchangeInfo` response, including timezone/server metadata, rate limits, assets, exchange filters, and the full symbols array
+- `markets`: active USDT-M perpetual contract metadata plus the complete original Binance symbol object in `exchange_info_json`, preserving all current and future fields such as filters, order types, time-in-force options, precision, and contract parameters
 - `tickers`: latest REST ticker snapshot
 - `klines`: historical and closed OHLCV candles
 - `market_metrics`: latest funding, mark/index price and open interest
