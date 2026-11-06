@@ -1,5 +1,7 @@
 import { closeDatabase, saveExchangeInfo, startDatabaseMaintenance } from "./database.js";
 import { refreshAllMarketMetrics } from "./detail-service.js";
+// [ADDED] Resolve market logos from CoinGecko with Trust Wallet fallback.
+import { refreshMarketLogos } from "./market-logo-service.js";
 import { stopDetailStreams } from "./detail-stream.js";
 import { startTopMovers, stopTopMovers } from "./top-movers.js";
 import { config } from "./config.js";
@@ -11,6 +13,8 @@ import { ManagedWebSocket } from "./websocket-manager.js";
 let refreshTimer = null;
 // [ADDED] Independent timer and lock for bulk premium-index persistence.
 let marketMetricsRefreshTimer = null;
+// [ADDED] Daily asset-logo metadata refresh timer.
+let marketLogoRefreshTimer = null;
 let marketMetricsRefreshInProgress = false;
 let refreshInProgress = false;
 let shuttingDown = false;
@@ -76,6 +80,13 @@ async function bootstrap() {
     console.warn("The API remains online and will retry during the next refresh cycle");
   }
 
+  // [ADDED] Resolve logos after the first market snapshot is available.
+  refreshMarketLogos().catch((error) => console.error("Initial market logo refresh failed:", error.message));
+  marketLogoRefreshTimer = setInterval(() => {
+    refreshMarketLogos({ force: true }).catch((error) => console.error("Scheduled market logo refresh failed:", error.message));
+  }, 24 * 60 * 60 * 1000);
+  marketLogoRefreshTimer.unref?.();
+
   marketSocket.connect();
   refreshMarketMetrics().catch((error) => console.error("Initial premium-index refresh failed:", error.message));
   marketMetricsRefreshTimer = setInterval(() => {
@@ -96,6 +107,7 @@ async function shutdown(signal) {
   console.info(`Received ${signal}; shutting down Beanance Market Backend`);
   if (refreshTimer) clearInterval(refreshTimer);
   if (marketMetricsRefreshTimer) clearInterval(marketMetricsRefreshTimer);
+  if (marketLogoRefreshTimer) clearInterval(marketLogoRefreshTimer);
   marketSocket.stop();
   stopTopMovers();
   stopDetailStreams();
