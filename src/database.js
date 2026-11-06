@@ -20,7 +20,13 @@ db.exec(`
     symbol TEXT PRIMARY KEY, pair TEXT NOT NULL, base_asset TEXT NOT NULL,
     quote_asset TEXT NOT NULL, margin_asset TEXT NOT NULL, contract_type TEXT NOT NULL,
     status TEXT NOT NULL, price_precision INTEGER, quantity_precision INTEGER,
-    onboard_date INTEGER, delivery_date INTEGER, updated_at INTEGER NOT NULL
+    onboard_date INTEGER, delivery_date INTEGER,
+    exchange_info_json TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS exchange_info (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    payload_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS tickers (
     symbol TEXT PRIMARY KEY, price_change REAL, price_change_percent REAL,
@@ -65,19 +71,25 @@ db.exec(`
 `);
 
 // [ADDED] Migrate existing databases without dropping previously collected history.
+const marketColumns = db.pragma("table_info(markets)");
+if (!marketColumns.some((column) => column.name === "exchange_info_json")) {
+  db.exec("ALTER TABLE markets ADD COLUMN exchange_info_json TEXT NOT NULL DEFAULT '{}'");
+}
+
 const topMoverHistoryColumns = db.pragma("table_info(top_movers_history)");
 if (!topMoverHistoryColumns.some((column) => column.name === "categories")) {
   db.exec("ALTER TABLE top_movers_history ADD COLUMN categories TEXT NOT NULL DEFAULT '[]'");
 }
 
 const upsertMarket = db.prepare(`
-  INSERT INTO markets (symbol,pair,base_asset,quote_asset,margin_asset,contract_type,status,price_precision,quantity_precision,onboard_date,delivery_date,updated_at)
-  VALUES (@symbol,@pair,@baseAsset,@quoteAsset,@marginAsset,@contractType,@status,@pricePrecision,@quantityPrecision,@onboardDate,@deliveryDate,@updatedAt)
+  INSERT INTO markets (symbol,pair,base_asset,quote_asset,margin_asset,contract_type,status,price_precision,quantity_precision,onboard_date,delivery_date,exchange_info_json,updated_at)
+  VALUES (@symbol,@pair,@baseAsset,@quoteAsset,@marginAsset,@contractType,@status,@pricePrecision,@quantityPrecision,@onboardDate,@deliveryDate,@exchangeInfoJson,@updatedAt)
   ON CONFLICT(symbol) DO UPDATE SET pair=excluded.pair,base_asset=excluded.base_asset,
     quote_asset=excluded.quote_asset,margin_asset=excluded.margin_asset,
     contract_type=excluded.contract_type,status=excluded.status,
     price_precision=excluded.price_precision,quantity_precision=excluded.quantity_precision,
-    onboard_date=excluded.onboard_date,delivery_date=excluded.delivery_date,updated_at=excluded.updated_at
+    onboard_date=excluded.onboard_date,delivery_date=excluded.delivery_date,
+    exchange_info_json=excluded.exchange_info_json,updated_at=excluded.updated_at
 `);
 const upsertTicker = db.prepare(`
   INSERT INTO tickers (symbol,price_change,price_change_percent,weighted_avg_price,last_price,last_quantity,open_price,high_price,low_price,base_volume,quote_volume,open_time,close_time,trade_count,event_time,updated_at)
@@ -120,6 +132,7 @@ const selectMarketSnapshot = db.prepare(`
     m.margin_asset AS marginAsset,m.contract_type AS contractType,m.status,
     m.price_precision AS pricePrecision,m.quantity_precision AS quantityPrecision,
     m.onboard_date AS onboardDate,m.delivery_date AS deliveryDate,
+    m.exchange_info_json AS exchangeInfoJson,
     t.price_change AS priceChange,t.price_change_percent AS priceChangePercent,
     t.weighted_avg_price AS weightedAvgPrice,t.last_price AS lastPrice,
     t.last_quantity AS lastQuantity,t.open_price AS openPrice,t.high_price AS highPrice,
@@ -183,7 +196,11 @@ export const saveMarkets = db.transaction((markets) => {
   const now = Date.now();
   const active = new Set();
   for (const market of markets) {
-    upsertMarket.run({ ...market, updatedAt: now });
+    upsertMarket.run({
+      ...market,
+      exchangeInfoJson: JSON.stringify(market.exchangeInfo ?? {}),
+      updatedAt: now
+    });
     active.add(market.symbol);
   }
   if (active.size) {
@@ -317,7 +334,38 @@ export function getStoredKlines(symbol, interval, limit = 500, endTime = null) {
 }
 
 export function getStoredMarketSnapshot() {
-  return selectMarketSnapshot.all();
+  return selectMarketSnapshot.all().map((row) => {
+    const { exchangeInfoJson, ...market } = row;
+    let exchangeInfo = {};
+    try {
+      exchangeInfo = JSON.parse(exchangeInfoJson || "{}");
+    } catch {
+      exchangeInfo = {};
+    }
+    return { ...market, exchangeInfo };
+  });
+}
+
+// [ADDED] Preserve the complete Binance USD-M exchangeInfo payload, including global metadata.
+export function saveExchangeInfo(payload) {
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.symbols)) {
+    throw new Error("Invalid Binance exchangeInfo payload");
+  }
+  db.prepare(`
+    INSERT INTO exchange_info (id, payload_json, updated_at)
+    VALUES (1, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json, updated_at=excluded.updated_at
+  `).run(JSON.stringify(payload), Date.now());
+}
+
+export function getStoredExchangeInfo() {
+  const row = db.prepare("SELECT payload_json, updated_at FROM exchange_info WHERE id=1").get();
+  if (!row) return null;
+  try {
+    return { ...JSON.parse(row.payload_json), updatedAt: row.updated_at };
+  } catch {
+    return null;
+  }
 }
 
 export function getStoredMetrics(symbol) {
