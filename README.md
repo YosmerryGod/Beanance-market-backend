@@ -54,7 +54,7 @@ All endpoints return JSON.
 | `GET /api/v1/market/futures/:symbol/klines?interval=1m&limit=500` | Historical OHLCV candles |\n| `GET /api/v1/market/futures/:symbol/indicators?interval=1h&limit=500` | Configurable MA, EMA, SAR, Supertrend and Bollinger series |
 | `GET /api/v1/market/futures/:symbol/depth?limit=20` | Current order book snapshot |
 | `GET /api/v1/market/futures/:symbol/trades?limit=50` | Recent public trades |
-| `GET /api/v1/market/futures/:symbol/metrics` | Mark/index price, funding rate and open interest |
+| `GET /api/v1/market/futures/:symbol/metrics` | Latest mark/index price, estimated settle price, funding rate, interest rate, next funding time, Binance event time and open interest |
 
 ### Technical indicators
 
@@ -161,7 +161,8 @@ Tables:
 - `markets`: active USDT-M perpetual contract metadata plus the complete original Binance symbol object in `exchange_info_json`, preserving all current and future fields such as filters, order types, time-in-force options, precision, and contract parameters
 - `tickers`: latest REST ticker snapshot
 - `klines`: historical and closed OHLCV candles
-- `market_metrics`: latest funding, mark/index price and open interest
+- `market_metrics`: latest premium-index fields (mark/index price, estimated settle price, last funding rate, interest rate, next funding time and Binance event time) plus open interest
+- The backend refreshes the bulk `/fapi/v1/premiumIndex` response every 10 seconds by default, stores matching active USDT-M perpetual symbols in one SQLite transaction, and preserves open-interest values between its independent updates. Configure with `MARKET_METRICS_REFRESH_INTERVAL_MS`.
 - `top_movers_history`: qualifying Top Movers events, unique per symbol/timeframe/candle
 
 Ticker snapshots and market metadata are refreshed with the existing market refresh cycle. Interim ticker ticks remain in memory to avoid writing every market tick to disk. Closed kline candles are persisted, with a rolling retention limit of 2,000 candles per symbol/timeframe. Top Movers history is written once per qualifying closed candle (not on every realtime tick), with a hard global cap of 500 newest records; older records are deleted automatically after each insert. The existing SQLite retention period (30 days by default) also removes expired history. Order book snapshots and individual trades remain transient.
