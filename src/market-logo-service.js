@@ -52,7 +52,7 @@ async function fetchCoinGeckoMarkets() {
 }
 
 async function fetchCoinList() {
-  const params = new URLSearchParams({ include_platform: "false" });
+  const params = new URLSearchParams({ include_platform: "true" });
   const result = await fetchJson(`${COINGECKO_BASE_URL}/coins/list?${params}`);
   return Array.isArray(result) ? result : [];
 }
@@ -75,18 +75,39 @@ function buildUniqueCoinMap(coins) {
   return unique;
 }
 
-async function trustWalletNativeLogo(coinId) {
-  if (!coinId || !/^[a-z0-9-]+$/.test(coinId)) return null;
-  const url = `${TRUST_WALLET_BASE_URL}/${coinId}/info/logo.png`;
-  try {
-    const response = await fetch(url, {
-      method: "HEAD",
-      signal: AbortSignal.timeout(8000)
-    });
-    return response.ok ? url : null;
-  } catch {
-    return null;
+async function trustWalletLogo(coin) {
+  const platformSlugs = {
+    ethereum: "ethereum",
+    "binance-smart-chain": "smartchain",
+    "polygon-pos": "polygon",
+    "avalanche": "avalanche",
+    "arbitrum-one": "arbitrum",
+    "optimistic-ethereum": "optimism",
+    base: "base",
+    tron: "tron"
+  };
+  const candidates = [];
+  for (const [platform, address] of Object.entries(coin?.platforms || {})) {
+    const slug = platformSlugs[platform];
+    if (slug && typeof address === "string" && address.length > 5) {
+      candidates.push(`${TRUST_WALLET_BASE_URL}/${slug}/assets/${encodeURIComponent(address)}/logo.png`);
+    }
   }
+  if (coin?.id && /^[a-z0-9-]+$/.test(coin.id)) {
+    candidates.push(`${TRUST_WALLET_BASE_URL}/${coin.id}/info/logo.png`);
+  }
+  for (const url of candidates.slice(0, 4)) {
+    try {
+      const response = await fetch(url, {
+        method: "HEAD",
+        signal: AbortSignal.timeout(4000)
+      });
+      if (response.ok) return url;
+    } catch {
+      // [ADDED] Continue to the next Trust Wallet chain candidate on missing or timed-out assets.
+    }
+  }
+  return null;
 }
 
 export async function refreshMarketLogos({ force = false } = {}) {
@@ -120,7 +141,7 @@ export async function refreshMarketLogos({ force = false } = {}) {
 
       // [ADDED] Trust Wallet native-asset logo is checked only when CoinGecko has no usable image.
       if (!logo) {
-        logo = await trustWalletNativeLogo(listedCoin.id);
+        logo = await trustWalletLogo(listedCoin);
         if (logo) {
           source = "trustwallet";
           trustWalletFallbacks += 1;
