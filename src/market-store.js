@@ -78,7 +78,8 @@ export function hydrateMarketStore() {
       deliveryDate: row.deliveryDate,
       logo: row.logo,
       logoSource: row.logoSource,
-      coingeckoId: row.coingeckoId
+      coingeckoId: row.coingeckoId,
+      underlyingSubType: Array.isArray(row.underlyingSubType) ? row.underlyingSubType : [] // [ADDED] Restore Binance asset categories from SQLite.
     };
     const tickerInfo = {
       symbol: row.symbol,
@@ -115,6 +116,7 @@ export function replaceSymbols(symbols) {
   saveMarkets(symbols);
   const marketSymbols = symbols.map(({ exchangeInfo, ...symbol }) => ({
     ...symbol,
+    underlyingSubType: Array.isArray(exchangeInfo?.underlyingSubType) ? exchangeInfo.underlyingSubType : [], // [ADDED] Keep Binance asset categories in the lightweight market cache.
     // [ADDED] Keep previously resolved logo metadata when Binance refreshes market metadata.
     logo: marketBySymbol.get(symbol.symbol)?.logo ?? null,
     logoSource: marketBySymbol.get(symbol.symbol)?.logoSource ?? null,
