@@ -51,6 +51,12 @@ async function fetchCoinGeckoMarkets() {
   return coins;
 }
 
+async function fetchCoinList() {
+  const params = new URLSearchParams({ include_platform: "false" });
+  const result = await fetchJson(`${COINGECKO_BASE_URL}/coins/list?${params}`);
+  return Array.isArray(result) ? result : [];
+}
+
 function buildUniqueCoinMap(coins) {
   const grouped = new Map();
   for (const coin of coins) {
@@ -96,21 +102,25 @@ export async function refreshMarketLogos({ force = false } = {}) {
 
     const coins = await fetchCoinGeckoMarkets();
     const coinBySymbol = buildUniqueCoinMap(coins);
+    // [ADDED] The full CoinGecko coin list lets Trust Wallet fallback cover assets outside the top 1,000.
+    const coinListBySymbol = buildUniqueCoinMap(await fetchCoinList());
     let saved = 0;
     let trustWalletFallbacks = 0;
 
     for (const market of markets) {
-      const coin = coinBySymbol.get(normalizeSymbol(market.baseAsset));
-      if (!coin) continue;
+      const symbol = normalizeSymbol(market.baseAsset);
+      const coin = coinBySymbol.get(symbol);
+      const listedCoin = coin || coinListBySymbol.get(symbol);
+      if (!listedCoin) continue;
 
-      let logo = typeof coin.image === "string" && coin.image.startsWith("https://")
+      let logo = typeof coin?.image === "string" && coin.image.startsWith("https://")
         ? coin.image
         : null;
       let source = logo ? "coingecko" : null;
 
       // [ADDED] Trust Wallet native-asset logo is checked only when CoinGecko has no usable image.
       if (!logo) {
-        logo = await trustWalletNativeLogo(coin.id);
+        logo = await trustWalletNativeLogo(listedCoin.id);
         if (logo) {
           source = "trustwallet";
           trustWalletFallbacks += 1;
@@ -118,7 +128,7 @@ export async function refreshMarketLogos({ force = false } = {}) {
       }
 
       if (!logo) continue;
-      const logoData = { logo, source, coingeckoId: coin.id };
+      const logoData = { logo, source, coingeckoId: listedCoin.id };
       saveMarketLogo(market.symbol, logoData);
       applyMarketLogo(market.symbol, logoData);
       saved += 1;
