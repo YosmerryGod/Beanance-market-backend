@@ -5,7 +5,7 @@ const COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3";
 const TRUST_WALLET_BASE_URL = "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains";
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PAGE_SIZE = 250;
-const PAGE_COUNT = 4;
+const PAGE_COUNT = 3;
 
 let refreshInProgress = false;
 let lastRefreshAt = null;
@@ -46,12 +46,14 @@ async function fetchCoinGeckoMarkets() {
     const result = await fetchJson(`${COINGECKO_BASE_URL}/coins/markets?${params}`);
     if (!Array.isArray(result) || result.length === 0) break;
     coins.push(...result);
-    if (page < PAGE_COUNT) await delay(2500);
+    if (page < PAGE_COUNT) await delay(process.env.COINGECKO_API_KEY ? 2500 : 15000);
   }
   return coins;
 }
 
 async function fetchCoinList() {
+  // [ADDED] Respect the lower and variable public API rate limit when no Demo key is configured.
+  await delay(process.env.COINGECKO_API_KEY ? 2500 : 15000);
   const params = new URLSearchParams({ include_platform: "true" });
   const result = await fetchJson(`${COINGECKO_BASE_URL}/coins/list?${params}`);
   return Array.isArray(result) ? result : [];
