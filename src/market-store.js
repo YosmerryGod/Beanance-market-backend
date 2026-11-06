@@ -108,8 +108,10 @@ export function hydrateMarketStore() {
 }
 
 export function replaceSymbols(symbols) {
-  symbolsBySymbol = new Map(symbols.map((symbol) => [symbol.symbol, symbol]));
+  // [MODIFIED] Persist full Binance metadata, but keep the in-memory ticker objects lightweight.
   saveMarkets(symbols);
+  const marketSymbols = symbols.map(({ exchangeInfo, ...symbol }) => symbol);
+  symbolsBySymbol = new Map(marketSymbols.map((symbol) => [symbol.symbol, symbol]));
   setPersistedSymbols(symbols.map((item) => item.symbol));
 
   for (const [symbol, current] of marketBySymbol.entries()) {
