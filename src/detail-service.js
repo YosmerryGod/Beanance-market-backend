@@ -1,6 +1,7 @@
 import {
   fetchKlines as fetchBinanceKlines,
   fetchFundingRates as fetchBinanceFundingRates,
+  fetchAllPremiumIndex,
   fetchOpenInterest,
   fetchOrderBook,
   fetchPremiumIndex,
@@ -11,7 +12,8 @@ import {
   getStoredMetrics,
   saveKline,
   saveKlines,
-  saveMarketMetrics
+  saveMarketMetrics,
+  savePremiumIndexSnapshots
 } from "./database.js";
 import { config } from "./config.js";
 
@@ -178,12 +180,51 @@ export async function getMarketMetrics(symbolValue, forceRefresh = false) {
       symbol, markPrice: Number(premium.markPrice), indexPrice: Number(premium.indexPrice),
       estimatedSettlePrice: Number(premium.estimatedSettlePrice),
       fundingRate: Number(premium.lastFundingRate), nextFundingTime: Number(premium.nextFundingTime),
+      interestRate: Number(premium.interestRate), time: Number(premium.time),
       openInterest: interest ? Number(interest.openInterest) : null,
       openInterestUpdatedAt: interest ? Number(interest.time || Date.now()) : null
     };
     saveMarketMetrics(metrics);
     return { ...metrics, updatedAt: Date.now() };
   });
+}
+
+// [ADDED] Refresh and persist the latest premium-index fields for all active USDT-M perpetual markets.
+export async function refreshAllMarketMetrics(symbolValues) {
+  const allowedSymbols = new Set(
+    (Array.isArray(symbolValues) ? symbolValues : [])
+      .map((value) => String(value || "").toUpperCase())
+      .filter((value) => /^[A-Z0-9]{3,30}$/.test(value))
+  );
+  if (!allowedSymbols.size) return { saved: 0, updatedAt: Date.now() };
+
+  const payload = await fetchAllPremiumIndex();
+  if (!Array.isArray(payload)) {
+    throw new Error("Binance premiumIndex bulk response is not an array");
+  }
+
+  const snapshots = payload
+    .filter((item) => item && allowedSymbols.has(String(item.symbol || "").toUpperCase()))
+    .map((item) => ({
+      symbol: String(item.symbol).toUpperCase(),
+      markPrice: Number(item.markPrice),
+      indexPrice: Number(item.indexPrice),
+      estimatedSettlePrice: Number(item.estimatedSettlePrice),
+      fundingRate: Number(item.lastFundingRate),
+      nextFundingTime: Number(item.nextFundingTime),
+      interestRate: Number(item.interestRate),
+      time: Number(item.time)
+    }))
+    .filter((item) => (
+      Number.isFinite(item.markPrice) &&
+      Number.isFinite(item.indexPrice) &&
+      Number.isFinite(item.fundingRate) &&
+      Number.isFinite(item.interestRate) &&
+      Number.isFinite(item.nextFundingTime) &&
+      Number.isFinite(item.time)
+    ));
+
+  return savePremiumIndexSnapshots(snapshots);
 }
 
 export function persistRealtimeKline(symbol, interval, kline) {
