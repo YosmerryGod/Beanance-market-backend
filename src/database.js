@@ -47,6 +47,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS market_metrics (
     symbol TEXT PRIMARY KEY, mark_price REAL, index_price REAL,
     estimated_settle_price REAL, funding_rate REAL, next_funding_time INTEGER,
+    interest_rate REAL, premium_index_time INTEGER,
     open_interest REAL, open_interest_updated_at INTEGER, updated_at INTEGER NOT NULL,
     FOREIGN KEY(symbol) REFERENCES markets(symbol) ON DELETE CASCADE
   );
@@ -74,6 +75,15 @@ db.exec(`
 const marketColumns = db.pragma("table_info(markets)");
 if (!marketColumns.some((column) => column.name === "exchange_info_json")) {
   db.exec("ALTER TABLE markets ADD COLUMN exchange_info_json TEXT NOT NULL DEFAULT '{}'");
+}
+
+// [ADDED] Migrate premium-index fields without discarding existing market metrics.
+const marketMetricColumns = db.pragma("table_info(market_metrics)");
+if (!marketMetricColumns.some((column) => column.name === "interest_rate")) {
+  db.exec("ALTER TABLE market_metrics ADD COLUMN interest_rate REAL");
+}
+if (!marketMetricColumns.some((column) => column.name === "premium_index_time")) {
+  db.exec("ALTER TABLE market_metrics ADD COLUMN premium_index_time INTEGER");
 }
 
 const topMoverHistoryColumns = db.pragma("table_info(top_movers_history)");
@@ -119,6 +129,22 @@ const upsertMetric = db.prepare(`
     open_interest=COALESCE(excluded.open_interest,market_metrics.open_interest),
     open_interest_updated_at=COALESCE(excluded.open_interest_updated_at,market_metrics.open_interest_updated_at),
     updated_at=excluded.updated_at
+`);
+
+// [ADDED] Bulk premium-index updates preserve independently refreshed open-interest values.
+const upsertPremiumMetric = db.prepare(`
+  INSERT INTO market_metrics (
+    symbol,mark_price,index_price,estimated_settle_price,funding_rate,next_funding_time,
+    interest_rate,premium_index_time,updated_at
+  ) VALUES (
+    @symbol,@markPrice,@indexPrice,@estimatedSettlePrice,@fundingRate,@nextFundingTime,
+    @interestRate,@premiumIndexTime,@updatedAt
+  )
+  ON CONFLICT(symbol) DO UPDATE SET
+    mark_price=excluded.mark_price,index_price=excluded.index_price,
+    estimated_settle_price=excluded.estimated_settle_price,funding_rate=excluded.funding_rate,
+    next_funding_time=excluded.next_funding_time,interest_rate=excluded.interest_rate,
+    premium_index_time=excluded.premium_index_time,updated_at=excluded.updated_at
 `);
 
 const selectKlinesLatest = db.prepare(`
@@ -260,6 +286,18 @@ export const saveMarketMetrics = (metrics) => {
   upsertMetric.run({ ...metrics, updatedAt: Date.now() });
 };
 
+// [ADDED] Persist one bulk premium-index snapshot for all active markets in one SQLite transaction.
+export const savePremiumIndexSnapshots = db.transaction((snapshots) => {
+  const now = Date.now();
+  let saved = 0;
+  for (const snapshot of snapshots) {
+    if (!snapshot || typeof snapshot.symbol !== "string") continue;
+    upsertPremiumMetric.run({ ...snapshot, updatedAt: now });
+    saved += 1;
+  }
+  return { saved, updatedAt: now };
+});
+
 export const saveTopMoverHistory = db.transaction((event) => {
   if (!event || !event.symbol || !event.timeframe || !Number.isFinite(event.candleOpenTime)) return false;
   insertTopMoverHistory.run({
@@ -375,7 +413,8 @@ export function getStoredMetrics(symbol) {
   return {
     symbol: row.symbol, markPrice: row.mark_price, indexPrice: row.index_price,
     estimatedSettlePrice: row.estimated_settle_price, fundingRate: row.funding_rate,
-    nextFundingTime: row.next_funding_time, openInterest: row.open_interest,
+    nextFundingTime: row.next_funding_time, interestRate: row.interest_rate,
+    time: row.premium_index_time, openInterest: row.open_interest,
     openInterestUpdatedAt: row.open_interest_updated_at, updatedAt: row.updated_at
   };
 }
