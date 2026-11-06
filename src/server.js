@@ -5,7 +5,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { config } from "./config.js";
 import { getBinanceRestStatus } from "./binance.js";
 import { getMarket, getMarkets, getMarketStatus } from "./market-store.js";
-import { getDatabaseStatus, getTopMoverHistory } from "./database.js";
+import { getDatabaseStatus, getStoredExchangeInfo, getTopMoverHistory } from "./database.js";
 import { getTopMovers, getTopMoversStatus, getTopMoverCategoryGroups, getTopMoversRevision, TOP_MOVER_CATEGORIES } from "./top-movers.js";
 import { getMarketDepth, getMarketFundingRates, getMarketKlines, getMarketMetrics, getMarketTrades } from "./detail-service.js";
 import { calculateIndicators, normalizeIndicatorOptions } from "./indicators.js";
@@ -133,6 +133,19 @@ app.get("/health", async () => ({
   detailStreams: getDetailStreamStatus(),
   topMovers: getTopMoversStatus()
 }));
+
+// [ADDED] Expose the latest complete Binance USD-M exchangeInfo snapshot.
+app.get("/api/v1/market/exchange-info", async (_request, reply) => {
+  const data = getStoredExchangeInfo();
+  if (!data) {
+    return reply.code(503).send({
+      success: false,
+      error: "EXCHANGE_INFO_NOT_READY",
+      message: "Binance exchange metadata has not been loaded yet"
+    });
+  }
+  return { success: true, data };
+});
 
 app.get("/api/v1/market/futures", async (request) => {
   const sort = ["symbol", "quoteVolume", "priceChangePercent"].includes(request.query.sort) ? request.query.sort : "symbol";
