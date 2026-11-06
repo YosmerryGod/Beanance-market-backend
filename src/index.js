@@ -1,13 +1,17 @@
 import { closeDatabase, saveExchangeInfo, startDatabaseMaintenance } from "./database.js";
+import { refreshAllMarketMetrics } from "./detail-service.js";
 import { stopDetailStreams } from "./detail-stream.js";
 import { startTopMovers, stopTopMovers } from "./top-movers.js";
 import { config } from "./config.js";
 import { createBinanceWebSocketUrl, fetchAll24hrTickers, fetchExchangeInfo } from "./binance.js";
-import { applyTicker, applyTickerSnapshot, getMarketStatus, hydrateMarketStore, replaceSymbols } from "./market-store.js";
+import { applyTicker, applyTickerSnapshot, getMarketStatus, getMarkets, hydrateMarketStore, replaceSymbols } from "./market-store.js";
 import { publishMarketStatus, publishMarketUpdate, startHttpServer, stopHttpServer } from "./server.js";
 import { ManagedWebSocket } from "./websocket-manager.js";
 
 let refreshTimer = null;
+// [ADDED] Independent timer and lock for bulk premium-index persistence.
+let marketMetricsRefreshTimer = null;
+let marketMetricsRefreshInProgress = false;
 let refreshInProgress = false;
 let shuttingDown = false;
 
@@ -37,6 +41,19 @@ async function refreshMarketData() {
   }
 }
 
+// [ADDED] One bulk Binance request refreshes the latest premium-index fields for every active market.
+async function refreshMarketMetrics() {
+  if (marketMetricsRefreshInProgress) return;
+  marketMetricsRefreshInProgress = true;
+  try {
+    const symbols = getMarkets().map((market) => market.symbol);
+    const result = await refreshAllMarketMetrics(symbols);
+    console.info(`Persisted premium-index metrics for ${result.saved}/${symbols.length} active markets`);
+  } finally {
+    marketMetricsRefreshInProgress = false;
+  }
+}
+
 function handleBinancePayload(payload) {
   const data = payload?.data ?? payload;
   const tickers = Array.isArray(data) ? data : [data];
@@ -60,6 +77,12 @@ async function bootstrap() {
   }
 
   marketSocket.connect();
+  refreshMarketMetrics().catch((error) => console.error("Initial premium-index refresh failed:", error.message));
+  marketMetricsRefreshTimer = setInterval(() => {
+    refreshMarketMetrics().catch((error) => console.error("Scheduled premium-index refresh failed:", error.message));
+  }, config.marketMetricsRefreshIntervalMs);
+  marketMetricsRefreshTimer.unref?.();
+
   startTopMovers().catch((error) => console.error("Multi-timeframe Top Movers streams failed to start:", error.message));
   refreshTimer = setInterval(() => {
     refreshMarketData().catch((error) => console.error("Scheduled market refresh failed:", error.message));
@@ -72,6 +95,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.info(`Received ${signal}; shutting down Beanance Market Backend`);
   if (refreshTimer) clearInterval(refreshTimer);
+  if (marketMetricsRefreshTimer) clearInterval(marketMetricsRefreshTimer);
   marketSocket.stop();
   stopTopMovers();
   stopDetailStreams();
