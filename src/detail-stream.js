@@ -4,8 +4,11 @@ import { persistRealtimeKline } from "./detail-service.js";
 import { ManagedWebSocket } from "./websocket-manager.js";
 
 const allowedStreams = new Set([
-  "kline_1m", "kline_5m", "kline_15m", "kline_30m",
-  "kline_1h", "kline_4h", "kline_1d", "depth20@100ms", "aggTrade"
+  // [MODIFIED] Allow every Binance USDⓈ-M Futures kline interval used by the chart interval picker.
+  "kline_1m", "kline_3m", "kline_5m", "kline_15m", "kline_30m",
+  "kline_1h", "kline_2h", "kline_4h", "kline_6h", "kline_8h", "kline_12h",
+  "kline_1d", "kline_3d", "kline_1w", "kline_1M",
+  "depth20@100ms", "aggTrade"
 ]);
 const subscriptionsByClient = new Map();
 const clientsByStream = new Map();
