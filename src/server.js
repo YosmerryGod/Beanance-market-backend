@@ -192,7 +192,7 @@ app.get("/api/v1/market/futures/:symbol/indicators", async (request, reply) => {
   const market = requireMarket(request.params.symbol, reply);
   if (!market) return reply;
 
-  const interval = String(request.query.interval || "1m").toLowerCase();
+  const interval = String(request.query.interval || "1m"); // [MODIFIED] Preserve uppercase 1M because Binance uses it for monthly candles.
   const limit = parseLimit(request.query.limit, 500, 1500);
   const endTime = request.query.endTime === undefined ? null : Number(request.query.endTime);
   if (endTime !== null && (!Number.isFinite(endTime) || endTime <= 0)) {
