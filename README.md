@@ -218,7 +218,7 @@ The scanner checks consecutive four-candle windows for positive taker volume del
    MCP_AUTH_TOKEN=PASTE_THE_GENERATED_SECRET_HERE
    ```
 
-3. Install dependencies and reload both PM2 processes:
+3. Install dependencies and reload both PM2 processes. The deployment script adds a blank `MCP_AUTH_TOKEN` if it is missing; the MCP process stays online but rejects MCP requests until you set a real token in `.env`:
 
    ```bash
    npm install
@@ -226,7 +226,7 @@ The scanner checks consecutive four-candle windows for positive taker volume del
    pm2 save
    ```
 
-4. Keep port 3031 private. Put the MCP path behind the existing HTTPS reverse proxy and forward it to `http://127.0.0.1:3031/mcp`. For Nginx, the location can use:
+4. After setting the token, restart the MCP process so it loads the new value, then keep port 3031 private. Run `pm2 restart beanance-market-mcp --update-env` and verify `curl http://127.0.0.1:3031/health` reports `authenticated: true`. Put the MCP path behind the existing HTTPS reverse proxy and forward it to `http://127.0.0.1:3031/mcp`. For Nginx, the location can use:
 
    ```nginx
    location = /mcp {
