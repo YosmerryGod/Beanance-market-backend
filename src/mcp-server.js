@@ -16,9 +16,7 @@ const DEFAULT_INDICATOR_OPTIONS = normalizeIndicatorOptions({
   emaPeriods: "9,21"
 });
 
-if (AUTH_TOKEN.length < 32) {
-  throw new Error("MCP_AUTH_TOKEN must be configured with at least 32 characters");
-}
+const AUTH_CONFIGURED = AUTH_TOKEN.length >= 32;
 
 function jsonToolResult(value) {
   return {
@@ -298,13 +296,24 @@ const httpServer = createServer(async (request, response) => {
 
   if (url.pathname === "/health" && request.method === "GET") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ success: true, service: "beanance-market-mcp", status: "ok" }));
+    response.end(JSON.stringify({
+      success: true,
+      service: "beanance-market-mcp",
+      status: AUTH_CONFIGURED ? "ok" : "not_configured",
+      authenticated: AUTH_CONFIGURED
+    }));
     return;
   }
 
   if (url.pathname !== "/mcp") {
     response.writeHead(404, { "content-type": "application/json" });
     response.end(JSON.stringify({ success: false, error: "NOT_FOUND" }));
+    return;
+  }
+
+  if (!AUTH_CONFIGURED) {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ success: false, error: "MCP_AUTH_NOT_CONFIGURED" }));
     return;
   }
 
@@ -342,6 +351,9 @@ const httpServer = createServer(async (request, response) => {
 
 httpServer.listen(PORT, HOST, () => {
   console.info(`Beanance Market MCP listening on http://${HOST}:${PORT}/mcp`);
+  if (!AUTH_CONFIGURED) {
+    console.warn("MCP_AUTH_TOKEN is missing or shorter than 32 characters; MCP requests are disabled until configured.");
+  }
 });
 
 function shutdown(signal) {
