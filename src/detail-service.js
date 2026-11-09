@@ -107,6 +107,30 @@ export async function getMarketKlines(symbolValue, intervalValue, limitValue = 5
   });
 }
 
+// [ADDED] Backfill recent closed 15m candles for every active market after startup.
+export async function backfillMarketKlines(symbolValues, interval = "15m", limit = 100) {
+  const symbols = [...new Set((Array.isArray(symbolValues) ? symbolValues : [])
+    .map((value) => String(value || "").toUpperCase())
+    .filter((value) => /^[\\p{L}\\p{N}]{3,30}$/u.test(value)))];
+  const summary = { interval, requestedSymbols: symbols.length, processedSymbols: 0, savedCandles: 0, failedSymbols: [] };
+
+  // [ADDED] Run requests sequentially so the Binance REST queue and weight budget stay predictable.
+  for (const symbol of symbols) {
+    try {
+      const rows = await fetchBinanceKlines(symbol, interval, limit);
+      const closed = rows.map((row) => normalizeKlineRow(symbol, interval, row))
+        .filter((candle) => candle.isClosed);
+      if (closed.length) summary.savedCandles += saveKlines(closed);
+      summary.processedSymbols += 1;
+    } catch (error) {
+      summary.failedSymbols.push({ symbol, error: error.message });
+      console.warn(`15m candle backfill failed for ${symbol}: ${error.message}`);
+    }
+  }
+
+  return summary;
+}
+
 export async function getMarketFundingRates(symbolValue, candles) {
   const symbol = normalizeSymbol(symbolValue);
   if (!Array.isArray(candles) || candles.length === 0) return [];
