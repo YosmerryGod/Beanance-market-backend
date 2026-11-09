@@ -64,7 +64,7 @@ export const config = {
     pairRetention: numberFromEnv("SQLITE_KLINE_RETENTION_PER_PAIR", 2000),
     maxKlineRows: numberFromEnv("SQLITE_MAX_KLINE_ROWS", 300000),
     retentionDays: numberFromEnv("SQLITE_RETENTION_DAYS", 30),
-    maxPersistedSymbols: numberFromEnv("SQLITE_MAX_PERSISTED_SYMBOLS", 100),
+    // [MODIFIED] Persist candle history for the complete active USDT-M perpetual market list.\n    maxPersistedSymbols: numberFromEnv("SQLITE_MAX_PERSISTED_SYMBOLS", 1000),
     maintenanceIntervalMs: numberFromEnv("SQLITE_MAINTENANCE_INTERVAL_MS", 3600000),
     maxDatabaseMb: numberFromEnv("SQLITE_MAX_DATABASE_MB", 256),
     allowedIntervals: parseList(process.env.SQLITE_KLINE_INTERVALS, "1m,5m,15m,1h,4h,1d")
