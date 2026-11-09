@@ -111,7 +111,7 @@ export async function getMarketKlines(symbolValue, intervalValue, limitValue = 5
 export async function backfillMarketKlines(symbolValues, interval = "15m", limit = 100) {
   const symbols = [...new Set((Array.isArray(symbolValues) ? symbolValues : [])
     .map((value) => String(value || "").toUpperCase())
-    .filter((value) => /^[\\p{L}\\p{N}]{3,30}$/u.test(value)))];
+    .filter((value) => /^[\p{L}\p{N}]{3,30}$/u.test(value)))];
   const summary = { interval, requestedSymbols: symbols.length, processedSymbols: 0, savedCandles: 0, failedSymbols: [] };
 
   // [ADDED] Run requests sequentially so the Binance REST queue and weight budget stay predictable.
