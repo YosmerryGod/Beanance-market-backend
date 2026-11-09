@@ -229,7 +229,8 @@ let lastCountRefreshAt = Date.now();
 let lastMaintenanceAt = null;
 
 export function setPersistedSymbols(symbols) {
-  persistedSymbols = new Set((Array.isArray(symbols) ? symbols : []).slice(0, config.database.maxPersistedSymbols));
+  // [MODIFIED] Keep every active market symbol eligible for candle persistence.
+  persistedSymbols = new Set(Array.isArray(symbols) ? symbols : []);
 }
 
 export const saveMarkets = db.transaction((markets) => {
