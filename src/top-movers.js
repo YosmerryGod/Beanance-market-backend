@@ -2,6 +2,8 @@ import { getMarket, getMarkets } from "./market-store.js";
 import { config } from "./config.js";
 import { ManagedWebSocket } from "./websocket-manager.js";
 import { getStoredKlines, saveTopMoverHistory } from "./database.js";
+// [ADDED] Persist closed 15m candles received by the all-market Top Movers stream.
+import { persistRealtimeKline } from "./detail-service.js";
 
 const MAX_RESULTS = 1000;
 // [MODIFIED] Only price moves of at least 2% qualify for Top Movers.
@@ -120,6 +122,8 @@ function handleKlineMessage(payload, timeframe) {
   if (!candle || !candle.s || candle.o === undefined || candle.c === undefined) return;
 
   const symbol = String(candle.s).toUpperCase();
+  // [ADDED] Keep SQLite 15m history fresh for every subscribed active futures symbol.
+  if (timeframe.interval === "15m") persistRealtimeKline(symbol, timeframe.interval, candle);
   const openPrice = Number(candle.o);
   const lastPrice = Number(candle.c);
   if (!(openPrice > 0) || !(lastPrice > 0)) return;
