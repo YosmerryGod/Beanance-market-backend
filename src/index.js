@@ -1,5 +1,5 @@
 import { closeDatabase, saveExchangeInfo, startDatabaseMaintenance } from "./database.js";
-import { refreshAllMarketMetrics } from "./detail-service.js";
+import { refreshAllMarketMetrics, backfillMarketKlines } from "./detail-service.js";
 // [ADDED] Resolve market logos from CoinGecko with Trust Wallet fallback.
 import { refreshMarketLogos } from "./market-logo-service.js";
 import { stopDetailStreams } from "./detail-stream.js";
@@ -95,6 +95,10 @@ async function bootstrap() {
   marketMetricsRefreshTimer.unref?.();
 
   startTopMovers().catch((error) => console.error("Multi-timeframe Top Movers streams failed to start:", error.message));
+  // [ADDED] Seed SQLite with 100 recent closed 15m candles for every active futures symbol.
+  backfillMarketKlines(getMarkets().map((market) => market.symbol), "15m", 100)
+    .then((result) => console.info(`15m candle backfill completed: ${result.savedCandles} candles saved for ${result.processedSymbols}/${result.requestedSymbols} symbols; ${result.failedSymbols.length} failed`))
+    .catch((error) => console.error("15m candle backfill failed:", error.message));
   refreshTimer = setInterval(() => {
     refreshMarketData().catch((error) => console.error("Scheduled market refresh failed:", error.message));
   }, config.marketRefreshIntervalMs);
