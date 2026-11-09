@@ -186,6 +186,62 @@ Ticker snapshots and market metadata are refreshed with the existing market refr
 
 The database file and its WAL files are ignored by Git.
 
+## ChatGPT MCP integration
+
+The repository includes a separate, authenticated, read-only MCP service. It reads the same SQLite database as the market API and does not place orders, modify market data, access Binance user accounts, or expose arbitrary SQL.
+
+### MCP tools
+
+| Tool | Purpose |
+| --- | --- |
+| `get_market_overview` | Backend health and persisted candle coverage |
+| `list_futures_markets` | Active USDT-M perpetual markets and ticker data |
+| `get_historical_klines` | Read closed OHLCV candles from SQLite |
+| `get_market_indicators` | Calculate the backend's MA, EMA, SAR, Supertrend, Bollinger, CVD and taker-flow indicators |
+| `scan_early_bullish_pattern` | Scan stored history for the four-candle early bullish pattern |
+
+The scanner checks consecutive four-candle windows for positive taker volume delta, rising CVD, EMA9 below EMA21, bearish Supertrend, and a rising close. It reports scanned symbols, matching symbols, matching windows, and a capped list of matches. Defaults are 15m candles, up to 2,000 stored candles per symbol, four positive-delta candles, and 50 returned matches.
+
+### Configure and run
+
+1. Generate a private token on the VPS:
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. Add the following values to the server's existing `.env`. Do not commit the real token:
+
+   ```env
+   MCP_HOST=127.0.0.1
+   MCP_PORT=3031
+   MCP_AUTH_TOKEN=PASTE_THE_GENERATED_SECRET_HERE
+   ```
+
+3. Install dependencies and reload both PM2 processes:
+
+   ```bash
+   npm install
+   pm2 startOrReload ecosystem.config.cjs --update-env
+   pm2 save
+   ```
+
+4. Keep port 3031 private. Put the MCP path behind the existing HTTPS reverse proxy and forward it to `http://127.0.0.1:3031/mcp`. For Nginx, the location can use:
+
+   ```nginx
+   location = /mcp {
+       proxy_pass http://127.0.0.1:3031/mcp;
+       proxy_http_version 1.1;
+       proxy_buffering off;
+       proxy_read_timeout 3600s;
+       proxy_set_header Host $host;
+       proxy_set_header Authorization $http_authorization;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   }
+   ```
+
+The remote MCP URL is `https://YOUR_API_DOMAIN/mcp`. Configure the client to use HTTP Bearer authentication with the same `MCP_AUTH_TOKEN`. The unauthenticated `GET /health` endpoint is only a process health check; all MCP requests require the bearer token.
+
 ## Environment variables
 
 | Variable | Default | Description |
