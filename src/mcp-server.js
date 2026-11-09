@@ -182,12 +182,13 @@ function createMcpServer() {
     "Scan stored candle history across active futures for the same four-candle early bullish pattern: positive taker volume delta, rising CVD, EMA9 below EMA21, bearish Supertrend, and price rising. Scans SQLite only and never places trades.",
     {
       interval: z.string().default("15m"),
-      candlesBack: z.number().int().min(100).max(2000).default(2000),
+      candlesBack: z.number().int().min(60).max(2000).default(60),
+      lookbackCandles: z.number().int().min(4).max(20).default(5),
       minPositiveDeltaCandles: z.number().int().min(1).max(4).default(4),
       minPriceRisePercent: z.number().min(0).max(10).default(0),
       maxResults: z.number().int().min(1).max(100).default(50)
     },
-    async ({ interval: rawInterval, candlesBack, minPositiveDeltaCandles, minPriceRisePercent, maxResults }) => {
+    async ({ interval: rawInterval, candlesBack, lookbackCandles, minPositiveDeltaCandles, minPriceRisePercent, maxResults }) => {
       try {
         const interval = normalizeInterval(rawInterval);
         const symbols = db.prepare("SELECT symbol FROM markets WHERE status='TRADING' ORDER BY symbol").all();
@@ -209,7 +210,9 @@ function createMcpServer() {
           const delta = indicators.volumeDelta.base;
           const supertrendDirection = indicators.supertrend.direction;
 
-          for (let endIndex = 3; endIndex < candles.length; endIndex += 1) {
+          const latestSearchIndex = candles.length - 1;
+          const firstSearchEndIndex = Math.max(3, candles.length - lookbackCandles);
+          for (let endIndex = firstSearchEndIndex; endIndex <= latestSearchIndex; endIndex += 1) {
             const startIndex = endIndex - 3;
             let positiveDeltaCount = 0;
             let emaBearish = true;
@@ -258,6 +261,11 @@ function createMcpServer() {
         queryMatches.sort((a, b) => b.endTime - a.endTime);
         return jsonToolResult({
           interval,
+          candlesBack,
+          lookbackCandles,
+          latestCandleOpenTime: symbolsWithCandles > 0
+            ? db.prepare("SELECT MAX(open_time) AS latestOpenTime FROM klines WHERE interval=? AND is_closed=1").get(interval).latestOpenTime
+            : null,
           pattern: {
             candleCount: 4,
             minPositiveDeltaCandles,
