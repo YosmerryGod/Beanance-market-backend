@@ -20,8 +20,7 @@ module.exports = {
         PORT: 3030,
         LOG_LEVEL: "warn"
       }
-    }
-    ,
+    },
     {
       name: "beanance-market-mcp",
       script: "src/mcp-server.js",
